@@ -1,0 +1,22 @@
+# Build output
+build/
+
+# Third-party Zeta Z80 core — fetched via tools/setup-zeta.sh (see README)
+zeta/
+
+# Old superzazu Z80 backup (replaced by Zeta)
+*.off
+
+# Copyrighted ROMs — supply your own and generate headers with tools/rom_to_header.py
+emu/bios_rom.h
+emu/game_rom.h
+emu/salamander.h
+emu/kvall2m1.h
+*.rom
+*.ROM
+
+# Keep the shared VS Code config
+!.vscode/*
+
+# macOS
+.DS_Store
