@@ -6,6 +6,9 @@
 #include "i2ckbd.h"
 #include "keymap.h"
 #include "keycodes.h"
+#ifdef PICOCALC_USB_KEYBOARD
+#include "usbkbd.h"
+#endif
 
 // PicoCalc MSX host.
 //   Core 0: emulatie (Z80/VDP/keyboard), gepaced op 60 Hz.
@@ -218,6 +221,9 @@ int main(void)
 #ifdef PICOCALC_I2C_KEYBOARD
     kbd_init();
 #endif
+#ifdef PICOCALC_USB_KEYBOARD
+    usbkbd_init(); // TinyUSB host op de native USB-poort
+#endif
 
     if (!machine_init()) {
 #ifndef PICOCALC_HDMI
@@ -248,6 +254,9 @@ int main(void)
 #ifdef PICOCALC_I2C_KEYBOARD
         // Toetsenbord pollen (I2C @10kHz is duur): elke 4e frame
         if (frame % 4 == 0) poll_keyboard();
+#endif
+#ifdef PICOCALC_USB_KEYBOARD
+        usbkbd_task(); // USB-host pompen (HID-reports -> MSX-matrix)
 #endif
 
         // Eén MSX-frame emuleren
@@ -280,7 +289,12 @@ int main(void)
         // netjes in lockstep met de 60 Hz display-uitvoer.
         {
             uint32_t f = video_hstx_frame_count();
-            while (video_hstx_frame_count() == f) tight_loop_contents();
+            while (video_hstx_frame_count() == f) {
+#ifdef PICOCALC_USB_KEYBOARD
+                usbkbd_task(); // USB vaak pompen tijdens de idle-wait -> snelle respons
+#endif
+                tight_loop_contents();
+            }
         }
 #else
         // LCD: 60 Hz via sleep_us.

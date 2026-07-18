@@ -93,6 +93,14 @@ if(PICOCALC_I2C_KEYBOARD)
     target_compile_definitions(PicoCalcMSX PRIVATE PICOCALC_I2C_KEYBOARD=1)
 endif()
 
+# USB-keyboard via TinyUSB-host op de native USB-poort (standalone HDMI-bord).
+option(PICOCALC_USB_KEYBOARD "Read a USB keyboard via TinyUSB host" ON)
+if(PICOCALC_USB_KEYBOARD)
+    target_sources(PicoCalcMSX PRIVATE usbkbd.c)
+    target_link_libraries(PicoCalcMSX tinyusb_host tinyusb_board)
+    target_compile_definitions(PicoCalcMSX PRIVATE PICOCALC_USB_KEYBOARD=1)
+endif()
+
 # Backend-specifieke sources + libraries
 if(PICOCALC_HDMI)
     target_sources(PicoCalcMSX PRIVATE
