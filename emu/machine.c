@@ -13,11 +13,6 @@
 #include <string.h>
 #include "konami-mega-rom-scc.h"
 #include "emu2149.h"
-#include "bios_rom.h"
-// #include "f1spirit.h"
-#include "nemesis2.h"
-// #include "salamander.h"
-// #include "kvall2m1.h"
 #include "pico.h"
 
 // PicoCalc-port van machine.c (milestone 1: boot naar BASIC).
@@ -99,20 +94,23 @@ static void __not_in_flash_func(write_port_impl)(uint8_t port, uint8_t value)
 static zuint8 zeta_in(void *ctx, zuint16 port) { (void)ctx; return read_port_impl((uint8_t)port); }
 static void zeta_out(void *ctx, zuint16 port, zuint8 value) { (void)ctx; write_port_impl((uint8_t)port, value); }
 
-bool machine_init(void)
+bool machine_init(const uint8_t *bios, uint32_t bios_size,
+                  const uint8_t *game, uint32_t game_size)
 {
+    (void)bios_size; // rom_read maskeert op 16-bit; de BIOS beslaat slot 0 (0x0000-0x7FFF)
+
     // Subslots in slot 3: subslot 2 = 64KB RAM (zoals de SDL-config)
     subslots_add_subslot(&subslots, 0, NULL, empty_read, empty_write);
     subslots_add_subslot(&subslots, 1, NULL, empty_read, empty_write);
     subslots_add_subslot(&subslots, 2, ram, ram_read, ram_write);
     subslots_add_subslot(&subslots, 3, NULL, empty_read, empty_write);
 
-    // Konami SCC cartridge (game uit flash) in slot 1
+    // Konami SCC cartridge in slot 1 (TODO: mapper-selectie per game)
     scc_init(&konami_scc);
-    scc_set_rom(&konami_scc, (uint8_t *)game_rom, GAME_ROM_SIZE);
+    scc_set_rom(&konami_scc, (uint8_t *)game, game_size);
 
     // Primaire slots
-    slots_add_slot(&slots, 0, (void *)bios_rom, rom_read, rom_write);   // BIOS (flash)
+    slots_add_slot(&slots, 0, (void *)bios, rom_read, rom_write);       // BIOS
     slots_add_slot(&slots, 1, &konami_scc, scc_read, scc_write);        // SCC-cartridge
     slots_add_slot(&slots, 2, NULL, empty_read, empty_write);
     slots_add_slot(&slots, 3, &subslots, subslots_read, subslots_write);

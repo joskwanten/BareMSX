@@ -10,7 +10,11 @@
 #define AUDIO_SAMPLE_RATE 48000 // direct 48 kHz -> HDMI-native, geen resampling nodig
 #define AUDIO_SAMPLES_PER_FRAME (AUDIO_SAMPLE_RATE / HZ) // 800
 
-bool machine_init();
+// Initialiseer de machine met een BIOS (slot 0) en een cartridge-ROM (slot 1).
+// De ROM-data leeft buiten de core (baked-in flash op de Pico, of geladen van
+// de sdcard) — de aanroeper levert de pointers + groottes.
+bool machine_init(const uint8_t *bios, uint32_t bios_size,
+                  const uint8_t *game, uint32_t game_size);
 void machine_do_cycles();
 void machine_generate_interrupt();
 void machine_get_audio(int16_t* chunk, uint32_t len);

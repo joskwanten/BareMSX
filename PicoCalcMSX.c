@@ -3,6 +3,8 @@
 #include "pico/multicore.h"
 #include "hardware/sync.h" // __dmb
 #include "machine.h"
+#include "bios_rom.h"  // baked-in BIOS (flash) — SD-loading komt later
+#include "nemesis2.h"  // baked-in cartridge-ROM
 #include "i2ckbd.h"
 #include "keymap.h"
 #include "keycodes.h"
@@ -225,7 +227,7 @@ int main(void)
     usbkbd_init(); // TinyUSB host op de native USB-poort
 #endif
 
-    if (!machine_init()) {
+    if (!machine_init(bios_rom, BIOS_ROM_SIZE, game_rom, GAME_ROM_SIZE)) {
 #ifndef PICOCALC_HDMI
         lcd_fill_screen(LCD_RED);
 #endif
