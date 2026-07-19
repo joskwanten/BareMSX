@@ -68,6 +68,19 @@ long storage_read_at(const char *dir, const char *name, uint32_t off, uint8_t *b
     return (fr == FR_OK) ? (long)br : -1;
 }
 
+long storage_write_at(const char *dir, const char *name, uint32_t off, const uint8_t *buf, size_t len)
+{
+    char path[300];
+    snprintf(path, sizeof path, "%s/%s", dir, name);
+    FIL f;
+    if (f_open(&f, path, FA_READ | FA_WRITE) != FR_OK) return -1;
+    if (f_lseek(&f, off) != FR_OK) { f_close(&f); return -1; }
+    UINT bw = 0;
+    FRESULT fr = f_write(&f, buf, (UINT)len, &bw);
+    f_close(&f); // sluit meteen -> data + FAT gegarandeerd op de kaart
+    return (fr == FR_OK) ? (long)bw : -1;
+}
+
 uint8_t *storage_load(const char *dir, const char *name, uint32_t *size)
 {
     long sz = storage_size(dir, name);

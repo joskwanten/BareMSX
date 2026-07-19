@@ -14,6 +14,7 @@
 #include "konami-mega-rom-scc.h"
 #include "mapper.h"
 #include "emu2149.h"
+#include "diskrom.h"
 #include "pico.h"
 
 // Platform-agnostische machine: BIOS/cartridge komen via machine_init binnen.
@@ -32,6 +33,21 @@ ppi_context_t ppi;
 konami_scc_t konami_scc;
 mapper_t cart; // niet-SCC cartridge-mapper (plain/konami/ascii8/16)
 PSG *psg; // AY-3-8910 (emu2149, integer)
+
+// Disk-interface (slot 2), optioneel: gezet via machine_attach_disk vóór
+// machine_init. Zonder attach blijft slot 2 leeg.
+static diskrom_t diskrom;
+static bool disk_attached = false;
+
+void machine_attach_disk(const uint8_t *disk_rom, uint32_t disk_rom_size,
+                         uint8_t sides, uint32_t total_sectors,
+                         void *io_ctx, wd_sector_io_t io)
+{
+    diskrom.rom = disk_rom;
+    diskrom.rom_size = disk_rom_size;
+    wd2793_init(&diskrom.fdc, sides, total_sectors, io_ctx, io);
+    disk_attached = true;
+}
 
 uint8_t psg_register = 0;
 
@@ -125,7 +141,13 @@ bool machine_init(const uint8_t *bios, uint32_t bios_size,
     } else {
         slots_add_slot(&slots, 1, NULL, empty_read, empty_write);       // leeg -> BIOS-only
     }
-    slots_add_slot(&slots, 2, NULL, empty_read, empty_write);
+    if (disk_attached) {
+        printf("[machine] disk interface in slot 2 (%u KB DISK.ROM, %u sides)\n",
+               (unsigned)(diskrom.rom_size / 1024), diskrom.fdc.sides);
+        slots_add_slot(&slots, 2, &diskrom, diskrom_read, diskrom_write);
+    } else {
+        slots_add_slot(&slots, 2, NULL, empty_read, empty_write);
+    }
     slots_add_slot(&slots, 3, &subslots, subslots_read, subslots_write);
 
     cpu.context = &slots;

@@ -66,11 +66,57 @@ static inline uint32_t c565_to_argb(uint16_t c)
     return 0xff000000u | (r << 16) | (g << 8) | b;
 }
 
+// Is dit de DISK.ROM in system/? (naam begint met "disk", hoofdletterongevoelig)
+static bool is_disk_rom_name(const char *n)
+{
+    return (n[0] == 'd' || n[0] == 'D') && (n[1] == 'i' || n[1] == 'I') &&
+           (n[2] == 's' || n[2] == 'S') && (n[3] == 'k' || n[3] == 'K');
+}
+
+// Sector-IO voor de WD2793: leest/schrijft het geselecteerde .dsk-image.
+static char g_dsk_name[STORAGE_MAX_NAME];
+static int dsk_sector_io(void *ctx, uint32_t lba, uint8_t *buf, bool write)
+{
+    (void)ctx;
+    long n = write
+        ? storage_write_at(SD_DSK, g_dsk_name, lba * 512u, buf, 512)
+        : storage_read_at(SD_DSK, g_dsk_name, lba * 512u, buf, 512);
+    return n == 512 ? 0 : -1;
+}
+
+// Dump het ARGB-framebuffer als PPM (headless test: kijken wat er op het
+// scherm staat zonder venster-interactie).
+static void dump_ppm(const char *path, const uint32_t *fb)
+{
+    FILE *f = fopen(path, "wb");
+    if (!f) return;
+    fprintf(f, "P6\n%d %d\n255\n", MSX_W, MSX_H);
+    for (int i = 0; i < MSX_W * MSX_H; i++) {
+        uint8_t px[3] = { (fb[i] >> 16) & 0xFF, (fb[i] >> 8) & 0xFF, fb[i] & 0xFF };
+        fwrite(px, 1, 3, f);
+    }
+    fclose(f);
+    printf("[test] framebuffer -> %s\n", path);
+}
+
 int main(int argc, char **argv)
 {
-    (void)argc;
-    (void)argv;
     setvbuf(stdout, NULL, _IONBF, 0); // direct loggen (dev)
+
+    // Testvlaggen: --slot1/--diska prefillen de menukeuze en slaan het menu
+    // over; --frames N + --dump pad = headless draaien en het scherm dumpen.
+    const char *arg_slot1 = NULL, *arg_diska = NULL, *arg_dump = NULL;
+    int arg_frames = 0, arg_press = 0;
+    bool arg_nomenu = false;
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--slot1") && i + 1 < argc) arg_slot1 = argv[++i];
+        else if (!strcmp(argv[i], "--diska") && i + 1 < argc) arg_diska = argv[++i];
+        else if (!strcmp(argv[i], "--frames") && i + 1 < argc) arg_frames = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--dump") && i + 1 < argc) arg_dump = argv[++i];
+        else if (!strcmp(argv[i], "--press") && i + 1 < argc) arg_press = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--nomenu")) arg_nomenu = true;
+    }
+    if (arg_slot1 || arg_diska) arg_nomenu = true;
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
@@ -107,10 +153,19 @@ int main(int argc, char **argv)
 
     storage_entry_t ent[128];
     char bios_name[STORAGE_MAX_NAME] = "";
+    char diskrom_name[STORAGE_MAX_NAME] = "";
 
+    // system/: het eerste bestand dat NIET "disk..." heet is de BIOS; het
+    // eerste dat wél zo heet is de DISK.ROM (optioneel).
     int ns = storage_list(SD_SYSTEM, ent, 128);
-    for (int i = 0; i < ns; i++)
-        if (!ent[i].is_dir) { snprintf(bios_name, sizeof bios_name, "%s", ent[i].name); break; }
+    for (int i = 0; i < ns; i++) {
+        if (ent[i].is_dir) continue;
+        if (is_disk_rom_name(ent[i].name)) {
+            if (!diskrom_name[0]) snprintf(diskrom_name, sizeof diskrom_name, "%s", ent[i].name);
+        } else if (!bios_name[0]) {
+            snprintf(bios_name, sizeof bios_name, "%s", ent[i].name);
+        }
+    }
     if (!bios_name[0]) {
         fprintf(stderr, "no BIOS found in sdcard/%s/\n", SD_SYSTEM);
         return 1;
@@ -124,11 +179,22 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    // DISK.ROM -> 32 KB buffer (meestal 16 KB groot).
+    static uint8_t disk_rom[32768];
+    long disk_rom_size = 0;
+    if (diskrom_name[0]) {
+        memset(disk_rom, 0xFF, sizeof disk_rom);
+        disk_rom_size = storage_read(SD_SYSTEM, diskrom_name, disk_rom, sizeof disk_rom);
+        if (disk_rom_size < 0) disk_rom_size = 0;
+    }
+
     // --- Boot menu: pick cartridges / disks ---
     menu_config_t cfg;
     memset(&cfg, 0, sizeof cfg);
     menu_init(bios, &cfg);
-    while (!menu_start_requested()) {
+    if (arg_slot1) snprintf(cfg.slot1, sizeof cfg.slot1, "%s", arg_slot1);
+    if (arg_diska) snprintf(cfg.diskA, sizeof cfg.diskA, "%s", arg_diska);
+    while (!arg_nomenu && !menu_start_requested()) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT) { SDL_Quit(); return 0; }
@@ -163,8 +229,29 @@ int main(int argc, char **argv)
             return 1;
         }
     }
-    printf("BIOS: system/%s   slot1: %s (%u bytes)\n",
-           bios_name, cfg.slot1[0] ? cfg.slot1 : "(empty)", game_size);
+
+    // --- Disk-interface (slot 2): DISK.ROM + WD2793, drive A = cfg.diskA ---
+    if (disk_rom_size > 0) {
+        uint8_t sides = 0;
+        uint32_t total_sectors = 0;
+        if (cfg.diskA[0]) {
+            long dsz = storage_size(SD_DSK, cfg.diskA);
+            if (dsz > 0) {
+                snprintf(g_dsk_name, sizeof g_dsk_name, "%s", cfg.diskA);
+                total_sectors = (uint32_t)dsz / 512u;
+                sides = (dsz <= 80 * 9 * 512) ? 1 : 2; // 360KB enkel-, 720KB dubbelzijdig
+            } else {
+                fprintf(stderr, "dsk/%s not found\n", cfg.diskA);
+            }
+        }
+        machine_attach_disk(disk_rom, (uint32_t)disk_rom_size, sides, total_sectors,
+                            NULL, dsk_sector_io);
+    }
+
+    printf("BIOS: system/%s   diskrom: %s   slot1: %s (%u bytes)   diskA: %s\n",
+           bios_name, diskrom_name[0] ? diskrom_name : "(none)",
+           cfg.slot1[0] ? cfg.slot1 : "(empty)", game_size,
+           cfg.diskA[0] ? cfg.diskA : "(empty)");
 
     if (!machine_init(bios, sizeof bios, game, game_size)) {
         fprintf(stderr, "machine_init failed\n");
@@ -174,8 +261,27 @@ int main(int argc, char **argv)
     const double freq = (double)SDL_GetPerformanceFrequency();
     uint64_t next = SDL_GetPerformanceCounter();
     bool running = true;
+    int frame_no = 0;
 
     while (running) {
+        // Headless test: na N frames het scherm dumpen en stoppen.
+        if (arg_frames > 0 && frame_no >= arg_frames) {
+            machine_snapshot_vdp();
+            for (int y = 0; y < MSX_H; y++) {
+                machine_render_snapshot_line(line, y);
+                memcpy(&fb[y * MSX_W], line, sizeof(line));
+            }
+            if (arg_dump) dump_ppm(arg_dump, fb);
+            break;
+        }
+        frame_no++;
+        if (arg_frames > 0 && frame_no % 30 == 0)
+            fprintf(stderr, "[trace] frame=%d pc=%04X\n", frame_no, machine_dbg_pc());
+        // Testinjectie: spatie indrukken op frame N (10 frames lang).
+        if (arg_press > 0) {
+            if (frame_no == arg_press) machine_keydown(64);      // MSX-matrix: spatie
+            if (frame_no == arg_press + 10) machine_keyup(64);
+        }
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT) {
@@ -209,13 +315,15 @@ int main(int argc, char **argv)
         SDL_RenderCopy(ren, tex, NULL, NULL);
         SDL_RenderPresent(ren);
 
-        // Pace to 60 Hz.
-        next += (uint64_t)(freq / HZ);
-        int64_t rem = (int64_t)(next - SDL_GetPerformanceCounter());
-        if (rem > 0)
-            SDL_Delay((uint32_t)(rem * 1000.0 / freq));
-        else
-            next = SDL_GetPerformanceCounter();
+        // Pace to 60 Hz (headless test: zo snel mogelijk).
+        if (arg_frames == 0) {
+            next += (uint64_t)(freq / HZ);
+            int64_t rem = (int64_t)(next - SDL_GetPerformanceCounter());
+            if (rem > 0)
+                SDL_Delay((uint32_t)(rem * 1000.0 / freq));
+            else
+                next = SDL_GetPerformanceCounter();
+        }
     }
 
     SDL_CloseAudioDevice(adev);

@@ -45,6 +45,10 @@ long storage_read(const char *dir, const char *name, uint8_t *buf, size_t max);
 // (short at EOF), or -1. Used for chunked reads (e.g. staging ROMs to flash).
 long storage_read_at(const char *dir, const char *name, uint32_t off, uint8_t *buf, size_t len);
 
+// Write `len` bytes at byte-offset `off` into an EXISTING dir/name (the file
+// is not created or grown). Returns bytes written, or -1. Used for .dsk writes.
+long storage_write_at(const char *dir, const char *name, uint32_t off, const uint8_t *buf, size_t len);
+
 // Allocate a buffer of the file's size, read the whole file into it, and return
 // it (caller frees). *size receives the byte count. Returns NULL on error.
 uint8_t *storage_load(const char *dir, const char *name, uint32_t *size);

@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "wd2793.h" // wd_sector_io_t (disk-interface)
 
 #define HZ 60
 #define MHZ 3.56
@@ -15,6 +16,13 @@
 // de sdcard) — de aanroeper levert de pointers + groottes.
 bool machine_init(const uint8_t *bios, uint32_t bios_size,
                   const uint8_t *game, uint32_t game_size);
+
+// Optioneel, aanroepen VÓÓR machine_init: hang een disk-interface in slot 2
+// (DISK.ROM op 0x4000-0x7FFF + WD2793 memory-mapped op 0x7FF8-0x7FFF).
+// `sides` 0 = lege drive; sector-IO loopt via de callback (512B-sectors).
+void machine_attach_disk(const uint8_t *disk_rom, uint32_t disk_rom_size,
+                         uint8_t sides, uint32_t total_sectors,
+                         void *io_ctx, wd_sector_io_t io);
 void machine_do_cycles();
 void machine_generate_interrupt();
 void machine_get_audio(int16_t* chunk, uint32_t len);

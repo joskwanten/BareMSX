@@ -119,6 +119,18 @@ long storage_read_at(const char *dir, const char *name, uint32_t off, uint8_t *b
     return (long)r;
 }
 
+long storage_write_at(const char *dir, const char *name, uint32_t off, const uint8_t *buf, size_t len)
+{
+    char path[1024];
+    path_of(path, sizeof path, dir, name);
+    FILE *f = fopen(path, "r+b"); // bestaand bestand, in-place
+    if (!f) return -1;
+    if (fseek(f, (long)off, SEEK_SET) != 0) { fclose(f); return -1; }
+    size_t w = fwrite(buf, 1, len, f);
+    fclose(f);
+    return (long)w;
+}
+
 uint8_t *storage_load(const char *dir, const char *name, uint32_t *size)
 {
     long sz = storage_size(dir, name);
