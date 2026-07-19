@@ -96,10 +96,15 @@ on VSYS alone is not enough.
 ```
 
 In `system/`, the first file whose name starts with `disk` is used as the
-DISK.ROM; the first other file is the MSX BIOS. Use a **Philips-interface
-(WD2793) MSX1 disk ROM — the VY-0010 external drive's ROM is the canonical
-choice** (an MSX2 DISK.ROM like the NMS-8245's mostly works too, but it
-makes MSX2 assumptions). No ROMs are distributed with this project.
+DISK.ROM; the first other file is the MSX BIOS.
+
+> **Recommended combo for disk support: a Philips VG-8020 BIOS + the
+> VY-0010 disk ROM.** That pairing is a genuine 1985 Dutch MSX1 setup
+> (the VY-0010 was *the* external drive for these machines), and both
+> ROMs match the emulated hardware exactly: MSX1 BIOS, WD2793 FDC with
+> the Philips register layout. An MSX2 DISK.ROM (e.g. the NMS-8245's)
+> mostly works too, but it makes MSX2 assumptions — if a disk misbehaves,
+> switch to the VY-0010 ROM first. No ROMs are distributed with this project.
 For a cartridge-only setup the free [C-BIOS](https://cbios.sourceforge.net/)
 (`cbios_main_msx1.rom`) works fine; for floppy disks you need the BIOS of
 a real MSX1 (C-BIOS cannot boot disks) — dump one from a machine you own.
