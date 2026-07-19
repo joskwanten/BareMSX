@@ -27,6 +27,7 @@ add_executable(msx_sdl
     ${ROOT}/emu/empty.c
     ${ROOT}/emu/util.c
     ${ROOT}/emu/konami-mega-rom-scc.c
+    ${ROOT}/emu/mapper.c
     ${ROOT}/emu/emu2149.c
 )
 

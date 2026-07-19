@@ -12,6 +12,7 @@
 #include "PPI.h"
 #include <string.h>
 #include "konami-mega-rom-scc.h"
+#include "mapper.h"
 #include "emu2149.h"
 #include "pico.h"
 
@@ -29,6 +30,7 @@ tms9918_context_t tms9918;
 tms9918_context_t tms9918_snap; // snapshot voor core 1 (blit) — vermijdt VDP-race
 ppi_context_t ppi;
 konami_scc_t konami_scc;
+mapper_t cart; // niet-SCC cartridge-mapper (plain/konami/ascii8/16)
 PSG *psg; // AY-3-8910 (emu2149, integer)
 
 uint8_t psg_register = 0;
@@ -105,13 +107,21 @@ bool machine_init(const uint8_t *bios, uint32_t bios_size,
     subslots_add_subslot(&subslots, 2, ram, ram_read, ram_write);
     subslots_add_subslot(&subslots, 3, NULL, empty_read, empty_write);
 
+    // SCC altijd initialiseren zodat scc_process (audio) veilig/stil is,
+    // ook als de game geen SCC gebruikt.
+    scc_init(&konami_scc);
+
     // Primaire slots
     slots_add_slot(&slots, 0, (void *)bios, rom_read, rom_write);       // BIOS
-    if (game && game_size) {
-        // Konami SCC cartridge in slot 1 (TODO: mapper-selectie per game)
-        scc_init(&konami_scc);
+
+    mapper_type_t mt = mapper_detect(game, game_size);
+    printf("[machine] cartridge mapper: %s (%u bytes)\n", mapper_name(mt), (unsigned)game_size);
+    if (mt == MAPPER_KONAMI_SCC) {
         scc_set_rom(&konami_scc, (uint8_t *)game, game_size);
         slots_add_slot(&slots, 1, &konami_scc, scc_read, scc_write);
+    } else if (mt != MAPPER_NONE) {
+        mapper_init(&cart, game, game_size, mt);
+        slots_add_slot(&slots, 1, &cart, mapper_read, mapper_write);
     } else {
         slots_add_slot(&slots, 1, NULL, empty_read, empty_write);       // leeg -> BIOS-only
     }

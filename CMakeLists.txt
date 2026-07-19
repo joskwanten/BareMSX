@@ -64,6 +64,7 @@ add_executable(PicoCalcMSX
         emu/empty.c
         emu/util.c
         emu/konami-mega-rom-scc.c
+        emu/mapper.c
         emu/emu2149.c
         )
 
