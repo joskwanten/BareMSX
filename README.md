@@ -1,4 +1,4 @@
-# PicoCalcMSX
+# BareMSX
 
 An open-source **MSX1 emulator for the Raspberry Pi Pico 2 (RP2350)** with
 **HDMI/DVI output over HSTX**, HDMI audio, a USB keyboard, and an SD card with
@@ -119,17 +119,17 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 ninja -C build
 ```
 
-Drop `build/PicoCalcMSX.uf2` onto the Pico in BOOTSEL mode, or flash
-`build/PicoCalcMSX.elf` over SWD with a debug probe.
+Drop `build/BareMSX.uf2` onto the Pico in BOOTSEL mode, or flash
+`build/BareMSX.elf` over SWD with a debug probe.
 
 ### Build options
 
 | Option | Default | |
 |--------|---------|---|
-| `PICOCALC_HDMI` | ON | HDMI/DVI over HSTX (OFF = PicoCalc ILI9488 LCD backend) |
-| `PICOCALC_USB_KEYBOARD` | ON | USB keyboard via TinyUSB host |
-| `PICOCALC_SD` | ON | SD card + boot menu (FatFs) |
-| `PICOCALC_BAKED_ROMS` | auto | Bake a fallback BIOS+game into the binary (only if you generated the headers yourself with `tools/rom_to_header.py`; OFF keeps the binary free of copyrighted material) |
+| `BAREMSX_HDMI` | ON | HDMI/DVI over HSTX (OFF = PicoCalc ILI9488 LCD backend) |
+| `BAREMSX_USB_KEYBOARD` | ON | USB keyboard via TinyUSB host |
+| `BAREMSX_SD` | ON | SD card + boot menu (FatFs) |
+| `BAREMSX_BAKED_ROMS` | auto | Bake a fallback BIOS+game into the binary (only if you generated the headers yourself with `tools/rom_to_header.py`; OFF keeps the binary free of copyrighted material) |
 
 ### Desktop build (SDL2)
 

@@ -77,7 +77,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    SDL_Window *win = SDL_CreateWindow("PicoCalcMSX (SDL)",
+    SDL_Window *win = SDL_CreateWindow("BareMSX (SDL)",
                                        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                        MSX_W * SCALE, MSX_H * SCALE, 0);
     SDL_Renderer *ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);

@@ -3,17 +3,17 @@
 #include "pico/multicore.h"
 #include "hardware/sync.h" // __dmb
 #include "machine.h"
-#ifdef PICOCALC_BAKED_ROMS
+#ifdef BAREMSX_BAKED_ROMS
 #include "bios_rom.h"  // ingebakken fallback-BIOS (zelf genereren, zie README)
 #include "nemesis2.h"  // ingebakken fallback-cartridge
 #endif
 #include "i2ckbd.h"
 #include "keymap.h"
 #include "keycodes.h"
-#ifdef PICOCALC_USB_KEYBOARD
+#ifdef BAREMSX_USB_KEYBOARD
 #include "usbkbd.h"
 #endif
-#ifdef PICOCALC_SD
+#ifdef BAREMSX_SD
 #include "storage.h"
 #include "menu.h"
 #include "flash_stage.h"
@@ -29,7 +29,7 @@
 // PicoCalc MSX host.
 //   Core 0: emulatie (Z80/VDP/keyboard), gepaced op 60 Hz.
 //   Core 1: beelduitvoer.
-//     - HDMI-build (PICOCALC_HDMI): pico_hdmi HSTX-outputloop, leest de
+//     - HDMI-build (BAREMSX_HDMI): pico_hdmi HSTX-outputloop, leest de
 //       framebuffer die core 0 rendert; geluid via HDMI data islands.
 //     - LCD-build (default fallback): blit van de VDP-snapshot naar de ILI9488.
 
@@ -52,7 +52,7 @@ static inline uint16_t argb_to_565(uint32_t px) {
     return (uint16_t)(((px >> 8) & 0xF800) | ((px >> 5) & 0x07E0) | ((px >> 3) & 0x001F));
 }
 
-#ifdef PICOCALC_HDMI
+#ifdef BAREMSX_HDMI
 // ===================== HDMI/DVI backend (RP2350 HSTX) =======================
 #include "hardware/clocks.h"
 #include "video_hstx.h"
@@ -183,7 +183,7 @@ static void __not_in_flash_func(core1_main)(void) {
         g_blit_count++;
     }
 }
-#endif // PICOCALC_HDMI
+#endif // BAREMSX_HDMI
 
 #ifdef PICOCALC_I2C_KEYBOARD
 // Toetsenbord pollen; gedeeld tussen beide backends.
@@ -195,7 +195,7 @@ static void poll_keyboard(void) {
         bool down = (kst == KBD_STATE_PRESSED || kst == KBD_STATE_HOLD);
         (void)down;
 
-#ifndef PICOCALC_HDMI
+#ifndef BAREMSX_HDMI
         // Host-hotkey: Ctrl + Alt samen = beeldschaal togglen (LCD-only)
         if (kcd == PC_KEY_CTRL) ctrl_down = down;
         else if (kcd == PC_KEY_ALT) alt_down = down;
@@ -220,7 +220,7 @@ int main(void)
 {
     enable_fpu(); // core 0 FPU aan vóór iets FP-achtigs draait (o.a. sleep_us-IRQ)
 
-#ifdef PICOCALC_HDMI
+#ifdef BAREMSX_HDMI
     // 252 MHz sysclk + HSTX-deler 2 -> 25.2 MHz pixelklok (640x480@60), maar de
     // CPU draait 2x zo snel als bij 126 MHz -> genoeg headroom voor emulatie +
     // rendering op 60 fps. (Vereist MODE_HSTX_CLK_DIV=2 in de pico_hdmi-build.)
@@ -230,19 +230,19 @@ int main(void)
     stdio_init_all();
     sleep_ms(750);
 
-#ifndef PICOCALC_HDMI
+#ifndef BAREMSX_HDMI
     lcd_init();
     lcd_fill_screen(LCD_BLACK);
 #endif
 #ifdef PICOCALC_I2C_KEYBOARD
     kbd_init();
 #endif
-#ifdef PICOCALC_USB_KEYBOARD
+#ifdef BAREMSX_USB_KEYBOARD
     usbkbd_init(); // TinyUSB host op de native USB-poort
 #endif
 
     // BIOS + game bepalen: van SD (met boot-menu) of ingebakken als fallback.
-#ifdef PICOCALC_BAKED_ROMS
+#ifdef BAREMSX_BAKED_ROMS
     const uint8_t *use_bios = bios_rom;
     uint32_t use_bios_size = BIOS_ROM_SIZE;
     const uint8_t *use_game = game_rom;
@@ -256,7 +256,7 @@ int main(void)
     uint32_t use_game_size = 0;
 #endif
 
-#if defined(PICOCALC_HDMI) && defined(PICOCALC_SD)
+#if defined(BAREMSX_HDMI) && defined(BAREMSX_SD)
     static uint8_t sd_bios[65536];
     static menu_config_t cfg;
     static storage_entry_t ent[64];
@@ -276,11 +276,11 @@ int main(void)
     }
 #endif
 
-#ifdef PICOCALC_HDMI
+#ifdef BAREMSX_HDMI
     video_hstx_init();   // HDMI-output + core 1 starten (het menu rendert hierin)
 #endif
 
-#if defined(PICOCALC_HDMI) && defined(PICOCALC_SD)
+#if defined(BAREMSX_HDMI) && defined(BAREMSX_SD)
     if (sd_ok) {
         // BIOS uit system/ (eerste bestand), gepad naar 64KB.
         char bios_name[STORAGE_MAX_NAME] = "";
@@ -347,7 +347,7 @@ int main(void)
         // Geen BIOS beschikbaar: geen (leesbare) SD-kaart en geen ingebakken
         // fallback. Effen MSX-blauw scherm als "plaats een SD-kaart"-signaal.
         printf("[boot] no BIOS: insert an SD card with system/<bios>.rom\n");
-#ifdef PICOCALC_HDMI
+#ifdef BAREMSX_HDMI
         while (true) {
             uint16_t *bb = video_hstx_backbuffer();
             if (bb) {
@@ -362,13 +362,13 @@ int main(void)
     }
 
     if (!machine_init(use_bios, use_bios_size, use_game, use_game_size)) {
-#ifndef PICOCALC_HDMI
+#ifndef BAREMSX_HDMI
         lcd_fill_screen(LCD_RED);
 #endif
         while (true) tight_loop_contents();
     }
 
-#ifndef PICOCALC_HDMI
+#ifndef BAREMSX_HDMI
     audio_init();
     // Nearest-neighbor x-mapping: scherm-x -> bron-x (256 breed -> 320 breed)
     for (int sx = 0; sx < SCALE_W; sx++)
@@ -381,7 +381,7 @@ int main(void)
     uint64_t sec_t0 = time_us_64();
 
     while (true) {
-#ifndef PICOCALC_HDMI
+#ifndef BAREMSX_HDMI
         uint64_t t0 = time_us_64();
 #endif
 
@@ -389,7 +389,7 @@ int main(void)
         // Toetsenbord pollen (I2C @10kHz is duur): elke 4e frame
         if (frame % 4 == 0) poll_keyboard();
 #endif
-#ifdef PICOCALC_USB_KEYBOARD
+#ifdef BAREMSX_USB_KEYBOARD
         usbkbd_task(); // USB-host pompen (HID-reports -> MSX-matrix)
 #endif
 
@@ -397,7 +397,7 @@ int main(void)
         machine_do_cycles();
         machine_generate_interrupt();
 
-#ifdef PICOCALC_HDMI
+#ifdef BAREMSX_HDMI
         audio_hdmi_generate();   // resample emu-audio -> ring (core 1 pompt naar HDMI)
         render_frame_hdmi();     // render naar back buffer + present (swap op vsync)
 #else
@@ -416,7 +416,7 @@ int main(void)
         frame++;
         emu_frames++;
 
-#ifdef PICOCALC_HDMI
+#ifdef BAREMSX_HDMI
         // Pace op de HDMI-frame (zoals de bouncing_box-demo): wacht tot de HSTX-
         // scanout een frame verder is. Geen sleep_us -> geen SDK-timer-alarm-IRQ
         // met FP-instructies (die gaf een NOCP-HardFault), en de emulatie loopt
@@ -424,7 +424,7 @@ int main(void)
         {
             uint32_t f = video_hstx_frame_count();
             while (video_hstx_frame_count() == f) {
-#ifdef PICOCALC_USB_KEYBOARD
+#ifdef BAREMSX_USB_KEYBOARD
                 usbkbd_task(); // USB vaak pompen tijdens de idle-wait -> snelle respons
 #endif
                 tight_loop_contents();
@@ -438,7 +438,7 @@ int main(void)
 
         // Eens per seconde: emulatie-fps + display-fps
         if (time_us_64() - sec_t0 >= 1000000) {
-#ifdef PICOCALC_HDMI
+#ifdef BAREMSX_HDMI
             static uint32_t last_disp = 0;
             uint32_t disp = video_hstx_frame_count();
             printf("[fps] emu=%lu display=%lu  pc=%04X\n",

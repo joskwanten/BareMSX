@@ -76,7 +76,7 @@ static void fill_row(uint16_t *fb, int cy, uint32_t c)
 static void render_main(uint16_t *fb)
 {
     fill_screen(fb, COL_BG);
-    draw_text(fb, 10, 1, "PicoCalcMSX", COL_TITLE, COL_BG);
+    draw_text(fb, 10, 1, "BareMSX", COL_TITLE, COL_BG);
     draw_text(fb, 3, 3, "-- select cartridges/disks --", COL_DIM, COL_BG);
 
     static const char *labels[4] = {"Slot 1:", "Slot 2:", "Disk A:", "Disk B:"};
