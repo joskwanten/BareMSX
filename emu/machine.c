@@ -152,9 +152,21 @@ bool machine_init(const uint8_t *bios, uint32_t bios_size,
         mapper_init(&cart2, game2, game2_size, mt2);
         slots_add_slot(&slots, 2, &cart2, mapper_read, mapper_write);
     } else if (disk_attached) {
+#ifdef TEST_DISK_21
+        // Diagnose: disk in geëxpandeerd subslot 2-1 (faalde met de MSX2-rom).
+        printf("[machine] TEST: disk interface in subslot 2-1\n");
+        static subslot_context_t subslots2t;
+        subslots2t.subslot_register = 0;
+        subslots_add_subslot(&subslots2t, 0, NULL, empty_read, empty_write);
+        subslots_add_subslot(&subslots2t, 1, &diskrom, diskrom_read, diskrom_write);
+        subslots_add_subslot(&subslots2t, 2, NULL, empty_read, empty_write);
+        subslots_add_subslot(&subslots2t, 3, NULL, empty_read, empty_write);
+        slots_add_slot(&slots, 2, &subslots2t, subslots_read, subslots_write);
+#else
         printf("[machine] disk interface in slot 2 (%u KB DISK.ROM, %u sides)\n",
                (unsigned)(diskrom.rom_size / 1024), diskrom.fdc.sides);
         slots_add_slot(&slots, 2, &diskrom, diskrom_read, diskrom_write);
+#endif
     } else {
         slots_add_slot(&slots, 2, NULL, empty_read, empty_write);
     }
@@ -164,12 +176,18 @@ bool machine_init(const uint8_t *bios, uint32_t bios_size,
     // bootfase en die ontspoort nu nog in de emulatie (banner-corruptie,
     // EXPTBL stuk) — uitzoeken vóór Nextor-support. Expanded RAM neemt het
     // Disk BASIC-pad en dat werkt.
+#ifdef TEST_FLAT_RAM
+    // Diagnose: plat 64KB-RAM (activeert de MSX-DOS-bootfase van de DISK.ROM).
+    printf("[machine] TEST: plat RAM in slot 3\n");
+    slots_add_slot(&slots, 3, ram, ram_read, ram_write);
+#else
     subslots3.subslot_register = 0;
     subslots_add_subslot(&subslots3, 0, NULL, empty_read, empty_write);
     subslots_add_subslot(&subslots3, 1, NULL, empty_read, empty_write);
     subslots_add_subslot(&subslots3, 2, ram, ram_read, ram_write);
     subslots_add_subslot(&subslots3, 3, NULL, empty_read, empty_write);
     slots_add_slot(&slots, 3, &subslots3, subslots_read, subslots_write);
+#endif
 
     cpu.context = &slots;
     cpu.fetch_opcode = cpu.fetch = cpu.nop = cpu.read = (Z80Read)slots_read;

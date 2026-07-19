@@ -96,8 +96,10 @@ on VSYS alone is not enough.
 ```
 
 In `system/`, the first file whose name starts with `disk` is used as the
-DISK.ROM (e.g. a Philips NMS-8245 `DISK.ROM`, WD2793-based); the first
-other file is the MSX BIOS. No ROMs are distributed with this project.
+DISK.ROM; the first other file is the MSX BIOS. Use a **Philips-interface
+(WD2793) MSX1 disk ROM — the VY-0010 external drive's ROM is the canonical
+choice** (an MSX2 DISK.ROM like the NMS-8245's mostly works too, but it
+makes MSX2 assumptions). No ROMs are distributed with this project.
 For a cartridge-only setup the free [C-BIOS](https://cbios.sourceforge.net/)
 (`cbios_main_msx1.rom`) works fine; for floppy disks you need the BIOS of
 a real MSX1 (C-BIOS cannot boot disks) — dump one from a machine you own.
