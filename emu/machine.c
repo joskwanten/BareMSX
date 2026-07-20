@@ -288,10 +288,19 @@ void __not_in_flash_func(machine_do_cycles)(void)
 #ifdef BAREMSX_MSX2
     if (g_msx2) {
         // Scanline-granulair: 262 lijnen x 228 T-states (NTSC-cadans); de
-        // V9938 krijgt na elke lijn zijn beam-událost (FH/VR/F + IRQs).
+        // V9938 krijgt na elke lijn zijn beam-event (FH/VR/F + IRQs).
+        int active_h = (v9938.regs[9] & 0x80) ? 212 : 192;
         for (int line = 0; line < 262; line++) {
             z80_run(&cpu, 228);
             v9938_scanline(&v9938, line);
+            if (line == active_h) {
+                // Snapshot PRECIES aan het einde van de zichtbare scan: de
+                // frame-IRQ is net geasserteerd maar de ISR heeft nog geen
+                // instructie gedraaid. Sprite-multiplexers (Vampire Killer)
+                // blanken in hun ISR de nét getoonde SAT/kleurtabel-slots —
+                // een post-ISR-snapshot flikkert (les uit msx_rs vram_display).
+                memcpy(&v9938_snap, &v9938, sizeof v9938_snap);
+            }
         }
         return;
     }
@@ -419,10 +428,7 @@ void machine_get_rendered_line(uint32_t *line, int y)
 void machine_snapshot_vdp(void)
 {
 #ifdef BAREMSX_MSX2
-    if (g_msx2) {
-        memcpy(&v9938_snap, &v9938, sizeof(v9938_context_t));
-        return;
-    }
+    if (g_msx2) return; // snapshot is al op de vblank-flank genomen (zie do_cycles)
 #endif
     memcpy(&tms9918_snap, &tms9918, sizeof(tms9918_context_t));
 }
