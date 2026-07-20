@@ -88,9 +88,9 @@ static bool name_wanted(const char *name, const char *const *exts)
     return false;
 }
 
-// Loop de central directory af; retourneert de eerste passende entry.
-static bool find_entry(const char *dir, const char *zipname,
-                       const char *const *exts, zip_entry_t *e)
+// Loop de central directory af; retourneert de (skip+1)-de passende entry.
+static bool find_entry_n(const char *dir, const char *zipname,
+                         const char *const *exts, int skip, zip_entry_t *e)
 {
     long fsize = storage_size(dir, zipname);
     if (fsize < 22) return false;
@@ -110,7 +110,7 @@ static bool find_entry(const char *dir, const char *zipname,
             return false;
         name[copy] = 0;
 
-        if (nlen == copy && name_wanted(name, exts)) {
+        if (nlen == copy && name_wanted(name, exts) && skip-- == 0) {
             e->method = rd16(&h[10]);
             e->crc32 = rd32(&h[16]);
             e->csize = rd32(&h[20]);
@@ -136,7 +136,7 @@ bool zip_find(const char *dir, const char *zipname, const char *const *exts,
               char *out_entry, size_t out_entry_n, uint32_t *out_usize)
 {
     zip_entry_t e;
-    if (!find_entry(dir, zipname, exts, &e)) return false;
+    if (!find_entry_n(dir, zipname, exts, 0, &e)) return false;
     if (out_entry) snprintf(out_entry, out_entry_n, "%s", e.name);
     if (out_usize) *out_usize = e.usize;
     return true;
@@ -237,32 +237,57 @@ static bool copy_stored_to_cache(const char *dir, const char *zipname,
     return crc == e->crc32;
 }
 
+// Pak één gevonden entry uit naar cache/cname (met hergebruik-check).
+static bool extract_entry(const char *dir, const char *zipname,
+                          const zip_entry_t *e, uint8_t *window,
+                          const char *cname)
+{
+    if (storage_size(SD_CACHE, cname) == (long)e->usize)
+        return true; // al uitgepakt
+    if (!storage_create(SD_CACHE, cname)) return false;
+    bool ok = (e->method == 0)
+        ? copy_stored_to_cache(dir, zipname, e, window, cname)
+        : inflate_to_cache(dir, zipname, e, window, cname);
+    if (!ok)
+        printf("[zip] uitpakken van %s (%s) mislukt\n", zipname, e->name);
+    return ok;
+}
+
+int zip_extract_all_cached(const char *dir, const char *zipname,
+                           const char *const *exts, uint8_t *window32k,
+                           char names[][128], int max)
+{
+    char base[STORAGE_MAX_NAME];
+    snprintf(base, sizeof base, "%s", zipname);
+    size_t bl = strlen(base);
+    if (bl > 4) base[bl - 4] = 0; // ".zip" eraf
+
+    int n = 0;
+    for (int i = 0; i < max; i++) {
+        zip_entry_t e;
+        if (!find_entry_n(dir, zipname, exts, i, &e)) break;
+        const char *dot = strrchr(e.name, '.');
+        char cname[STORAGE_MAX_NAME];
+        snprintf(cname, sizeof cname, "%s-%d%s", base, i + 1, dot ? dot : "");
+        if (!extract_entry(dir, zipname, &e, window32k, cname)) return 0;
+        snprintf(names[n], 128, "%s", cname);
+        n++;
+    }
+    return n;
+}
+
 bool zip_extract_cached(const char *dir, const char *zipname,
                         const char *const *exts, uint8_t *window32k,
                         char *out_cache_name, size_t out_n)
 {
     zip_entry_t e;
-    if (!find_entry(dir, zipname, exts, &e)) return false;
+    if (!find_entry_n(dir, zipname, exts, 0, &e)) return false;
 
     char cname[STORAGE_MAX_NAME];
     cache_name_for(zipname, e.name, cname, sizeof cname);
-
-    // Al uitgepakt met dezelfde grootte? Dan hergebruiken. (Een .dsk in de
-    // cache kan beschreven zijn door de emulator; dat is juist de bedoeling —
-    // het origineel in de zip blijft onaangeroerd.)
-    if (storage_size(SD_CACHE, cname) == (long)e.usize) {
-        snprintf(out_cache_name, out_n, "%s", cname);
-        return true;
-    }
-
-    if (!storage_create(SD_CACHE, cname)) return false;
-    bool ok = (e.method == 0)
-        ? copy_stored_to_cache(dir, zipname, &e, window32k, cname)
-        : inflate_to_cache(dir, zipname, &e, window32k, cname);
-    if (!ok) {
-        printf("[zip] uitpakken van %s mislukt (corrupt/afgekapt?)\n", zipname);
-        return false;
-    }
+    // (Een .dsk in de cache kan door de emulator beschreven zijn; dat is de
+    // bedoeling — het origineel in de zip blijft onaangeroerd.)
+    if (!extract_entry(dir, zipname, &e, window32k, cname)) return false;
     snprintf(out_cache_name, out_n, "%s", cname);
     return true;
 }

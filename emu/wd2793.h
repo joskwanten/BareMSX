@@ -56,4 +56,8 @@ void wd2793_init(wd2793_t *fdc, uint8_t sides, uint32_t total_sectors,
 uint8_t wd2793_read(wd2793_t *fdc, uint16_t addr);
 void wd2793_write(wd2793_t *fdc, uint16_t addr, uint8_t value);
 
+// Diskwissel in drive A: alleen de geometrie wisselt (zoals een echte
+// wissel); de controller-state blijft staan. sides = 0 -> lege drive.
+void wd2793_set_disk(wd2793_t *fdc, uint8_t sides, uint32_t total_sectors);
+
 #endif // WD2793_H

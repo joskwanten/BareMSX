@@ -27,6 +27,10 @@ void machine_attach_disk(const uint8_t *disk_rom, uint32_t disk_rom_size,
                          uint8_t sides, uint32_t total_sectors,
                          void *io_ctx, wd_sector_io_t io);
 
+// Diskwissel in drive A tijdens het draaien (F12): nieuwe geometrie, zelfde
+// sector-IO-callback. No-op zonder aangesloten disk-interface.
+void machine_disk_swap(uint8_t sides, uint32_t total_sectors);
+
 // MSX2-profiel (alleen beschikbaar in builds met BAREMSX_MSX2; de Pico kan
 // dit kan sinds de lijn-pipeline óók op een kale Pico 2). bios = 32KB main-
 // BIOS, ext = sub-ROM (begrensd op ext_size), vram128k = door de host

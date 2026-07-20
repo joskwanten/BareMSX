@@ -6,6 +6,14 @@
 
 // --- menu-mode navigation event queue ---
 static volatile bool g_menu_mode = false;
+static volatile bool g_swap_req = false; // F12 gezien (clear-on-read)
+
+bool usbkbd_swap_requested(void)
+{
+    bool r = g_swap_req;
+    g_swap_req = false;
+    return r;
+}
 #define MENU_Q 8
 static volatile int g_mq[MENU_Q];
 static volatile int g_mq_head = 0, g_mq_tail = 0;
@@ -133,6 +141,12 @@ static void process_report(const hid_keyboard_report_t *r)
              KEYBOARD_MODIFIER_LEFTCTRL | KEYBOARD_MODIFIER_RIGHTCTRL, MSX_CTRL);
     diff_mod(prev_mod, r->modifier,
              KEYBOARD_MODIFIER_LEFTALT | KEYBOARD_MODIFIER_RIGHTALT, MSX_GRAPH);
+
+    // Hotkey: F12 = diskwissel (niet in de MSX-matrix).
+    for (int i = 0; i < 6; i++) {
+        uint8_t k = r->keycode[i];
+        if (k == HID_KEY_F12 && !contains(prev_kc, k)) g_swap_req = true;
+    }
 
     // Releases: keys in the previous report that are gone now.
     for (int i = 0; i < 6; i++) {

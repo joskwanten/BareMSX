@@ -31,4 +31,12 @@ bool zip_extract_cached(const char *dir, const char *zipname,
                         const char *const *exts, uint8_t *window32k,
                         char *out_cache_name, size_t out_n);
 
+// Pak ALLE passende entries uit (zip-volgorde) naar cache/<zipbase>-N<ext>.
+// Voor multi-disk-games in één zip: de teruggegeven lijst is de F12-
+// wisselset. Vult tot `max` namen (elk STORAGE_MAX_NAME=128 groot);
+// retourneert het aantal, of 0 bij een fout/geen match.
+int zip_extract_all_cached(const char *dir, const char *zipname,
+                           const char *const *exts, uint8_t *window32k,
+                           char names[][128], int max);
+
 #endif // ZIP_H

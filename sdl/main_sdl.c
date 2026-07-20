@@ -90,6 +90,21 @@ static int dsk_sector_io(void *ctx, uint32_t lba, uint8_t *buf, bool write)
     return n == 512 ? 0 : -1;
 }
 
+// --- diskwissel (F12): de .dsk-set uit de boot-zip ---
+static char g_dsk_set[8][128];
+static int g_dsk_set_n = 0, g_dsk_set_cur = 0;
+static void disk_swap_next(void)
+{
+    if (g_dsk_set_n < 2) return;
+    g_dsk_set_cur = (g_dsk_set_cur + 1) % g_dsk_set_n;
+    snprintf(g_dsk_name, sizeof g_dsk_name, "%s", g_dsk_set[g_dsk_set_cur]);
+    g_dsk_dir = SD_CACHE;
+    long dsz = storage_size(SD_CACHE, g_dsk_name);
+    if (dsz > 0)
+        machine_disk_swap((dsz <= 80 * 9 * 512) ? 1 : 2, (uint32_t)dsz / 512u);
+    printf("[disk] drive A <- cache/%s\n", g_dsk_name);
+}
+
 // --- .zip-transparantie: bij selectie uitpakken naar cache/ ---
 static uint8_t zip_window[ZIP_WINDOW_SIZE];
 static const char *ROM_EXTS[] = {".rom", ".mx1", ".mx2", ".bin", NULL};
@@ -301,8 +316,17 @@ int main(int argc, char **argv)
     if (disk_rom_size > 0) {
         uint8_t sides = 0;
         uint32_t total_sectors = 0;
+        if (cfg.diskA[0] && zip_is_zip(cfg.diskA)) {
+            // Multi-disk-zip: alle .dsk-entries uitpakken; F12 wisselt erbinnen.
+            g_dsk_set_n = zip_extract_all_cached(SD_DSK, cfg.diskA, DSK_EXTS,
+                                                 zip_window, g_dsk_set, 8);
+            if (g_dsk_set_n > 0) {
+                snprintf(cfg.diskA, sizeof cfg.diskA, "%s", g_dsk_set[0]);
+                g_dsk_dir = SD_CACHE;
+                printf("[zip] disk-set: %d image(s), F12 wisselt\n", g_dsk_set_n);
+            }
+        }
         if (cfg.diskA[0]) {
-            g_dsk_dir = maybe_unzip(SD_DSK, cfg.diskA, DSK_EXTS);
             long dsz = storage_size(g_dsk_dir, cfg.diskA);
             if (dsz > 0) {
                 snprintf(g_dsk_name, sizeof g_dsk_name, "%s", cfg.diskA);
@@ -417,6 +441,7 @@ int main(int argc, char **argv)
             if (e.type == SDL_QUIT) {
                 running = false;
             } else if (e.type == SDL_KEYDOWN && !e.key.repeat) {
+                if (e.key.keysym.scancode == SDL_SCANCODE_F12) { disk_swap_next(); continue; }
                 uint8_t m = sc_to_msx[e.key.keysym.scancode];
                 if (m) machine_keydown(m - 1);
             } else if (e.type == SDL_KEYUP) {

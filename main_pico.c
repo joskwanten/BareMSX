@@ -77,6 +77,22 @@ static uint8_t vdp_arena[128 * 1024] __attribute__((aligned(4)));
 // het menu (96KB) rendert, en helemaal vrij in het pre-video-stagingpad.
 static const char *ZIPROM_EXTS[] = {".rom", ".mx1", ".mx2", ".bin", NULL};
 static const char *ZIPDSK_EXTS[] = {".dsk", NULL};
+// Diskwissel (F12): de .dsk-set uit de boot-zip; alleen dan is er iets te
+// wisselen (losse .dsk's kunnen mid-game niet uit een zip worden gepakt).
+static char g_dsk_set[8][128];
+static int g_dsk_set_n = 0, g_dsk_set_cur = 0;
+static void disk_swap_next(void)
+{
+    if (g_dsk_set_n < 2) return;
+    g_dsk_set_cur = (g_dsk_set_cur + 1) % g_dsk_set_n;
+    snprintf(g_dsk_name, sizeof g_dsk_name, "%s", g_dsk_set[g_dsk_set_cur]);
+    g_dsk_dir = SD_CACHE;
+    long dsz = storage_size(SD_CACHE, g_dsk_name);
+    if (dsz > 0)
+        machine_disk_swap((dsz <= 80 * 9 * 512) ? 1 : 2, (uint32_t)dsz / 512u);
+    printf("[disk] drive A <- cache/%s\n", g_dsk_name);
+}
+
 static const char *maybe_unzip(const char *dir, char *name_io, const char *const *exts)
 {
     if (!zip_is_zip(name_io)) return dir;
@@ -178,8 +194,14 @@ int main(void)
             if ((int)(didx - 1) < nd && !ent[didx - 1].is_dir)
                 snprintf(g_dsk_name, sizeof g_dsk_name, "%s", ent[didx - 1].name);
         }
-        if (didx && g_dsk_name[0])
-            g_dsk_dir = maybe_unzip(SD_DSK, g_dsk_name, ZIPDSK_EXTS);
+        if (didx && g_dsk_name[0] && zip_is_zip(g_dsk_name)) {
+            g_dsk_set_n = zip_extract_all_cached(SD_DSK, g_dsk_name, ZIPDSK_EXTS,
+                                                 vdp_arena + 96 * 1024, g_dsk_set, 8);
+            if (g_dsk_set_n > 0) {
+                snprintf(g_dsk_name, sizeof g_dsk_name, "%s", g_dsk_set[0]);
+                g_dsk_dir = SD_CACHE;
+            }
+        }
         int nr = storage_list(SD_ROMS, ent, 64);
         if ((int)idx < nr && !ent[idx].is_dir) {
             char nm[STORAGE_MAX_NAME];
@@ -270,7 +292,16 @@ int main(void)
                     // cfg.diskA blijft de menunaam (nodig voor de reboot-
                     // index); g_dsk_name wordt de echte (evt. cache-)naam.
                     snprintf(g_dsk_name, sizeof g_dsk_name, "%s", cfg.diskA);
-                    g_dsk_dir = maybe_unzip(SD_DSK, g_dsk_name, ZIPDSK_EXTS);
+                    if (zip_is_zip(g_dsk_name)) {
+                        // Multi-disk-zip: hele set uitpakken; F12 wisselt.
+                        g_dsk_set_n = zip_extract_all_cached(SD_DSK, g_dsk_name, ZIPDSK_EXTS,
+                                                             vdp_arena + 96 * 1024, g_dsk_set, 8);
+                        if (g_dsk_set_n > 0) {
+                            snprintf(g_dsk_name, sizeof g_dsk_name, "%s", g_dsk_set[0]);
+                            g_dsk_dir = SD_CACHE;
+                            printf("[zip] disk-set: %d image(s), F12 wisselt\n", g_dsk_set_n);
+                        }
+                    }
                 }
 
                 use_game = NULL;
@@ -401,6 +432,9 @@ int main(void)
     while (true) {
 #ifdef BAREMSX_USB_KEYBOARD
         usbkbd_task(); // USB-host pompen (HID-reports -> MSX-matrix)
+#ifdef BAREMSX_SD
+        if (usbkbd_swap_requested()) disk_swap_next();
+#endif
 #endif
 
         uint32_t f_start = video_hstx_frame_count();

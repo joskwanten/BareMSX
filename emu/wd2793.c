@@ -23,6 +23,13 @@ void wd2793_init(wd2793_t *fdc, uint8_t sides, uint32_t total_sectors,
     fdc->tmode = WD_T_NONE;
 }
 
+void wd2793_set_disk(wd2793_t *fdc, uint8_t sides, uint32_t total_sectors)
+{
+    fdc->sides = sides;
+    fdc->total_sectors = total_sectors;
+    fdc->tmode = WD_T_NONE; // een eventueel lopende transfer breekt af (echte wissel)
+}
+
 // Drive A met een disk erin; drive B (bit 0 van de drive-latch) bestaat niet.
 static bool drive_ready(const wd2793_t *fdc)
 {

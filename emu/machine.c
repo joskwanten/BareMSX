@@ -80,6 +80,12 @@ void machine_attach_disk(const uint8_t *disk_rom, uint32_t disk_rom_size,
     disk_attached = true;
 }
 
+void machine_disk_swap(uint8_t sides, uint32_t total_sectors)
+{
+    if (disk_attached)
+        wd2793_set_disk(&diskrom.fdc, sides, total_sectors);
+}
+
 uint8_t psg_register = 0;
 
 #ifdef SCC_DEBUG

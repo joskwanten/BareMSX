@@ -15,4 +15,7 @@ void usbkbd_task(void); // pump the host stack; call often (e.g. every frame)
 void usbkbd_menu_mode(bool on);
 int usbkbd_menu_poll(void); // next menu event (menu_input_t) or -1 if none
 
+// Hotkey: F12 (diskwissel). True precies één keer per druk (clear-on-read).
+bool usbkbd_swap_requested(void);
+
 #endif // USBKBD_H
