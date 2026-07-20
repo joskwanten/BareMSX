@@ -158,6 +158,9 @@ endif()
 # 252 MHz sysclk + HSTX-deler 2 -> zelfde 25.2 MHz pixelklok, 2x CPU-headroom.
 set(PICO_HDMI_HSTX_CLK_DIV 2 CACHE STRING "HSTX clk div (252MHz/2 -> 25.2MHz pixel)" FORCE)
 add_subdirectory(third_party/pico_hdmi)
+# DI-wachtrij: 64 voorge-encodeerde islands (~5ms audio) i.p.v. 256 (36KB):
+# de echte buffering zit in de rauwe audioring; dit overbrugt alleen jitter.
+target_compile_definitions(pico_hdmi PUBLIC DI_RING_BUFFER_SIZE=64)
 target_link_libraries(BareMSX pico_hdmi)
 
 pico_add_extra_outputs(BareMSX)

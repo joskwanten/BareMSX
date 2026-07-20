@@ -16,7 +16,7 @@
 
 // --- Lock-free SPSC ring of 48 kHz stereo frames ---
 // core 0 writes at a_head, core 1 reads at a_tail.
-#define ARING_BITS 12
+#define ARING_BITS 11 // 2048 samples (~43ms) — ruim met de continue pomp
 #define ARING (1u << ARING_BITS)
 #define ARING_MASK (ARING - 1)
 static int16_t aring_l[ARING];
@@ -76,7 +76,7 @@ void __not_in_flash_func(audio_hdmi_pump)(void)
     // een vást punt in het frame. Een paar islands per keer druppelt net zo
     // hard bij (de taak draait vele malen per scanlijn), zonder burst.
     int budget = 4;
-    while (hstx_di_queue_get_level() < 200 && budget-- > 0) {
+    while (hstx_di_queue_get_level() < 48 && budget-- > 0) { // < DI-capaciteit (64)
         if (aring_fill() < 4)
             break; // underrun: the library inserts a silence island for us
 
