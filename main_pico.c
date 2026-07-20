@@ -368,10 +368,10 @@ int main(void)
         }
     }
 
-    // Disk-interface (subslot 3-3): DISK.ROM uit system/ + gekozen .dsk als
-    // drive A. (MSX1-profiel; in het MSX2-profiel is disk nog niet bedraad.)
+    // Disk-interface (slot 2): DISK.ROM uit system/ + gekozen .dsk als
+    // drive A. Werkt in beide profielen (MSX2: naast de mapper-RAM in 3-2).
     static uint8_t disk_rom[16384];
-    if (sd_ok && diskrom_name[0] && !boot_msx2) {
+    if (sd_ok && diskrom_name[0]) {
         long drs = storage_read(SD_SYSTEM, diskrom_name, disk_rom, sizeof disk_rom);
         if (drs > 0) {
             uint8_t sides = 0;

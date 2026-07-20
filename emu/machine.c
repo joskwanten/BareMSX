@@ -432,7 +432,13 @@ bool machine_init_msx2(const uint8_t *bios, uint32_t bios_size,
     } else {
         slots_add_slot(&slots, 1, NULL, empty_read, empty_write);
     }
-    slots_add_slot(&slots, 2, NULL, empty_read, empty_write);
+    if (disk_attached) {
+        printf("[machine] disk interface in slot 2 (%u KB DISK.ROM, %u sides)\n",
+               (unsigned)(diskrom.rom_size / 1024), diskrom.fdc.sides);
+        slots_add_slot(&slots, 2, &diskrom, diskrom_read, diskrom_write);
+    } else {
+        slots_add_slot(&slots, 2, NULL, empty_read, empty_write);
+    }
 
     subslots3.subslot_register = 0;
     subslots_add_subslot(&subslots3, 0, &ext_win, romwin_read, romwin_write); // sub-ROM (begrensd)
