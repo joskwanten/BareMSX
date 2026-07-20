@@ -31,7 +31,9 @@ static int g_sel;
 static int g_field;                 // which config field is being set (0..3)
 static const char *g_dir;           // storage folder for the browse
 static char *g_target;              // config field to write
-static storage_entry_t g_list[256];
+static storage_entry_t g_list[128]; // 128 entries/map: ruim, en ~17KB
+                                    // RAM gespaard (heap moet de tijdelijke
+                                    // zip-extractiebuffers ~15KB kunnen dragen)
 static int g_list_n, g_bsel, g_btop;
 
 // --- rendering (RGB565 output; colours defined as ARGB, converted here) ---
