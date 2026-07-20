@@ -23,3 +23,6 @@ emu/kvall2m1.h
 .DS_Store
 emu/nemesis2.h
 emu/f1spirit.h
+
+# Referentiedocumenten (lokaal, niet in git — zie docs/MSX2-PORT-PLAN.md voor URLs)
+docs/refs/

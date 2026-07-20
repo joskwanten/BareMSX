@@ -10,8 +10,11 @@ naast de framebuffers in 520KB SRAM).
   `~/Projects/rust/msx_rs/`. Eerder betrouwbaar gebleken bij de WD2793-port.
   Kanttekening: bevat bekende glitches (o.a. Quarth), vooral rond de
   command-engine-timing t.o.v. de beam — die delen NIET 1-op-1 porten.
-- **Primaire spec: de V9938 Technical Data Book** (Yamaha/ASCII). Bij elke
-  twijfel wint de datasheet.
+- **Primaire spec: de V9938 Technical Data Book** (Yamaha/ASCII, aug 1985).
+  Lokaal: `docs/refs/V9938_Technical_Data_Book.pdf` (niet in git); bron:
+  https://www.bitsavers.org/pdf/yamaha/Yamaha_V9938_MSX-Video_Technical_Data_Book_Aug85.pdf
+  Online naslag: Grauw's MSX Assembly Page, https://map.grauw.nl/resources/video/v9938/v9938.xhtml
+  Bij elke twijfel wint de datasheet.
 - **Gedragsreferentie: openMSX** (en waar handig fMSX) — raadplegen om
   hardwaregedrag te begrijpen, met nette vermelding in de documentatie.
   NOOIT code overnemen of vertalen: openMSX is GPL-2.0 en fMSX
