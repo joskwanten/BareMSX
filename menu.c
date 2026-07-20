@@ -24,7 +24,7 @@ static bool g_start;
 typedef enum { MODE_MAIN, MODE_BROWSE } mode_t;
 static mode_t g_mode;
 
-// main screen: rows 0..3 = slot1/slot2/diskA/diskB, 4 = Start
+// main screen: rows 0..2 = slot1/slot2/diskA, 3 = Start
 static int g_sel;
 
 // browse sub-screen
@@ -79,10 +79,11 @@ static void render_main(uint16_t *fb)
     draw_text(fb, 12, 1, "BareMSX", COL_TITLE, COL_BG); // (32-7)/2 = gecentreerd
     draw_text(fb, 3, 3, "-- select cartridges/disks --", COL_DIM, COL_BG);
 
-    static const char *labels[4] = {"Slot 1:", "Slot 2:", "Disk A:", "Disk B:"};
-    const char *vals[4] = {g_cfg->slot1, g_cfg->slot2, g_cfg->diskA, g_cfg->diskB};
+    // (Drive B bestaat niet in de emulatie; diskwissel = F12 in-game.)
+    static const char *labels[3] = {"Slot 1:", "Slot 2:", "Disk A:"};
+    const char *vals[3] = {g_cfg->slot1, g_cfg->slot2, g_cfg->diskA};
 
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 3; i++) {
         int row = 6 + i * 2;
         bool sel = (g_sel == i);
         uint32_t fg = sel ? COL_SEL_TEXT : COL_TEXT;
@@ -96,7 +97,7 @@ static void render_main(uint16_t *fb)
     }
 
     // Start
-    bool ssel = (g_sel == 4);
+    bool ssel = (g_sel == 3);
     if (ssel) fill_row(fb, 17, COL_SEL_BG);
     draw_text(fb, 12, 17, "[ Start ]", ssel ? COL_SEL_TEXT : COL_TEXT, ssel ? COL_SEL_BG : COL_BG);
 
@@ -150,7 +151,7 @@ static void open_browse(int field)
     g_field = field;
     g_dir = (field < 2) ? SD_ROMS : SD_DSK;
     g_target = (field == 0) ? g_cfg->slot1 : (field == 1) ? g_cfg->slot2
-             : (field == 2) ? g_cfg->diskA : g_cfg->diskB;
+             : g_cfg->diskA;
     int n = storage_list(g_dir, g_list, (int)(sizeof g_list / sizeof g_list[0]));
     g_list_n = (n < 0) ? 0 : n;
     g_bsel = 0;
@@ -162,16 +163,16 @@ void menu_input(menu_input_t in)
 {
     if (g_mode == MODE_MAIN) {
         switch (in) {
-        case MENU_UP:   g_sel = (g_sel + 4) % 5; break;
-        case MENU_DOWN: g_sel = (g_sel + 1) % 5; break;
+        case MENU_UP:   g_sel = (g_sel + 3) % 4; break;
+        case MENU_DOWN: g_sel = (g_sel + 1) % 4; break;
         case MENU_ENTER:
-            if (g_sel == 4) g_start = true;
+            if (g_sel == 3) g_start = true;
             else open_browse(g_sel);
             break;
         case MENU_BACK: // clear the selected field
-            if (g_sel < 4) {
+            if (g_sel < 3) {
                 char *t = (g_sel == 0) ? g_cfg->slot1 : (g_sel == 1) ? g_cfg->slot2
-                        : (g_sel == 2) ? g_cfg->diskA : g_cfg->diskB;
+                        : g_cfg->diskA;
                 t[0] = 0;
             }
             break;
