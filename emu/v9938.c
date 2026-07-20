@@ -442,9 +442,15 @@ static void cmd_start(v9938_context_t *ctx, uint8_t v)
 #endif
     if (cm == 0) { cmd_done(ctx); return; } // STOP
     if (cm == 0xF || cm == 0xB) {
-        // HMMC/LMMC: CPU->VRAM; data komt per R44-write binnen.
+        // HMMC/LMMC: CPU->VRAM. SPEC-SUBTILITEIT (§9.7): de R44/CLR-waarde
+        // op het moment van de commandostart is het EERSTE datum; de stream
+        // via R44-writes begint dus bij pixel/byte 1. (Zonder dit schoof
+        // alles één op en lekte de CLR-setup van het volgende glyph als
+        // valse pixelkolom in de staart van het vorige — zie het MSX2-
+        // bootscherm "128Kbytes"-artefact.)
         ctx->cm = cm;
         ctx->status[2] |= S2_CE | S2_TR;
+        cmd_cpu_step(ctx, ctx->regs[44]);
         return;
     }
     if (cm == 0xA) {
@@ -476,6 +482,10 @@ static void cmd_cpu_step(v9938_context_t *ctx, uint8_t data)
     case 0xB: // LMMC: pixel met log. op
         x = (uint32_t)(ctx->cdx + (int32_t)ctx->cwx * ctx->cdix) & (L.width - 1);
         y = (uint32_t)(ctx->cdy + (int32_t)ctx->cwy * ctx->cdiy) & 0x3FF;
+#ifdef VDP_CMD_DEBUG
+        if (y >= 110 && y < 120)
+            fprintf(stderr, "[lmmc] x=%u y=%u d=%02X\n", x, y, data);
+#endif
         vdp_pset(ctx, x, y, data, ctx->clo);
         ctx->cwx++;
         if (ctx->cwx >= blk_nx(ctx)) {
