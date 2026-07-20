@@ -344,6 +344,163 @@ static void render_sprites_m1(v9938_context_t *ctx, uint32_t *px, int ln)
     }
 }
 
+// ---- bitmap-modes (G4-G7, §6) ----
+// Kleur 0 toont de backdrop tenzij TP (R8 bit 5) gezet is; verticale scroll
+// (R23) verschuift de bitmap-bron per lijn.
+
+static inline uint32_t bmp_color(v9938_context_t *ctx, uint32_t idx)
+{
+    if (idx == 0 && !(ctx->regs[8] & 0x20))
+        return ctx->palette[BACKDROP_IDX(ctx)];
+    return ctx->palette[idx];
+}
+
+static void render_g4(v9938_context_t *ctx, uint32_t *px, int ln) // scr5: 256px 4bpp
+{
+    uint32_t base = (((uint32_t)ctx->regs[2] >> 5) & 3) << 15;
+    uint32_t y = ((uint32_t)ln + ctx->regs[23]) & 0xFF;
+    const uint8_t *row = &ctx->vram[base + y * 128];
+    for (int x = 0; x < 256; x += 2) {
+        uint8_t b = row[x >> 1];
+        px[x] = bmp_color(ctx, b >> 4);
+        px[x + 1] = bmp_color(ctx, b & 0x0F);
+    }
+}
+
+static void render_g5(v9938_context_t *ctx, uint32_t *px512, int ln) // scr6: 512px 2bpp
+{
+    uint32_t base = (((uint32_t)ctx->regs[2] >> 5) & 3) << 15;
+    uint32_t y = ((uint32_t)ln + ctx->regs[23]) & 0xFF;
+    const uint8_t *row = &ctx->vram[base + y * 128];
+    for (int x = 0; x < 512; x += 4) {
+        uint8_t b = row[x >> 2];
+        px512[x] = bmp_color(ctx, (b >> 6) & 3);
+        px512[x + 1] = bmp_color(ctx, (b >> 4) & 3);
+        px512[x + 2] = bmp_color(ctx, (b >> 2) & 3);
+        px512[x + 3] = bmp_color(ctx, b & 3);
+    }
+}
+
+static void render_g6(v9938_context_t *ctx, uint32_t *px512, int ln) // scr7: 512px 4bpp
+{
+    uint32_t base = (((uint32_t)ctx->regs[2] >> 5) & 1) << 16;
+    uint32_t y = ((uint32_t)ln + ctx->regs[23]) & 0xFF;
+    const uint8_t *row = &ctx->vram[base + y * 256];
+    for (int x = 0; x < 512; x += 2) {
+        uint8_t b = row[x >> 1];
+        px512[x] = bmp_color(ctx, b >> 4);
+        px512[x + 1] = bmp_color(ctx, b & 0x0F);
+    }
+}
+
+static void render_g7(v9938_context_t *ctx, uint32_t *px, int ln) // scr8: 256px GGGRRRBB
+{
+    uint32_t base = (((uint32_t)ctx->regs[2] >> 5) & 1) << 16;
+    uint32_t y = ((uint32_t)ln + ctx->regs[23]) & 0xFF;
+    const uint8_t *row = &ctx->vram[base + y * 256];
+    for (int x = 0; x < 256; x++) {
+        uint8_t b = row[x];
+        uint32_t g = (b >> 5) & 7, r = (b >> 2) & 7, bl = b & 3;
+        px[x] = 0xFF000000u | (c3to8(r) << 16) | (c3to8(g) << 8)
+              | (((bl << 6) | (bl << 4) | (bl << 2) | bl) & 0xFF);
+    }
+}
+
+static void render_t2(v9938_context_t *ctx, uint32_t *px512, int ln) // 80-koloms tekst
+{
+    uint32_t PG = pattern_table(ctx);
+    uint32_t PN = ((uint32_t)ctx->regs[2] & 0x7C) << 10;
+    uint32_t bg = ctx->palette[BACKDROP_IDX(ctx)];
+    uint32_t t = (ctx->regs[7] >> 4) & 0x0F;
+    uint32_t fg = t ? ctx->palette[t] : bg;
+    int y = ln >> 3, i = ln & 7;
+    for (int k = 0; k < 512; k++) px512[k] = bg;
+    if (y >= 24) return; // (26.5-regelmodus + blink: later)
+    for (int x = 0; x < 80; x++) {
+        uint32_t c = ctx->vram[PN + (uint32_t)(y * 80) + x];
+        uint32_t p = ctx->vram[PG + 8 * c + i];
+        for (int j = 0; j < 6; j++)
+            px512[16 + x * 6 + j] = (p & (0x80 >> j)) ? fg : bg;
+    }
+}
+
+// ---- sprite mode 2 (G3-G7, §2.6): 8 per lijn, kleur-per-lijn uit de
+// kleurtabel (SAT-512), EC per lijn, CC-keten (OR-combinatie met de
+// eerstvolgende lagere sprite), sentinel Y=0xD8, scrollt mee met R23.
+// Levert palette-indices in een 256-brede overlay (0xFF = geen sprite).
+static void render_sprites_m2(v9938_context_t *ctx, uint8_t *ovr, int ln)
+{
+    memset(ovr, 0xFF, 256);
+    if (ctx->regs[8] & 0x02) return; // SPD
+
+    uint32_t SA = (((uint32_t)ctx->regs[11] & 3) << 15) | (((uint32_t)ctx->regs[5] & 0xFC) << 7);
+    uint32_t SC = SA - 0x200; // kleurtabel 512 bytes onder de SAT
+    uint32_t SG = ((uint32_t)ctx->regs[6] & 0x3F) << 11;
+    int size16 = SIXTEEN(ctx), mag = MAGNIFIED(ctx);
+    int OH = (size16 ? 16 : 8) << (mag ? 1 : 0); // schermhoogte
+    int IH = size16 ? 16 : 8;                    // patroonhoogte (Y-wrap!)
+    uint8_t vscroll = ctx->regs[23];
+
+    // Pas 1: markeer de eerste 8 sprites op deze lijn (incl. transparante).
+    uint32_t marked = 0;
+    int count = 0;
+    for (int s = 0; s < 32; s++) {
+        uint8_t yr = ctx->vram[SA + 4u * (uint32_t)s];
+        if (yr == 0xD8) break;
+        uint8_t k = (uint8_t)(yr - vscroll);
+        int sy = (k > 256 - IH) ? ((int)k + 1 - 256) : ((int)k + 1);
+        int dy = ln - sy;
+        if (dy < 0 || dy >= OH) continue;
+        if (++count > 8) break; // 9e en verder valt weg op echte hardware
+        marked |= 1u << s;
+    }
+
+    // Pas 2: hoog→laag zodat het laagste nummer wint; CC-keten à la de
+    // fMSX-OrThem-regel — een sprite OR-t als de eerstvolgende HOGERE
+    // gemarkeerde sprite CC=1 had, en de keten schuift bij ELKE
+    // gemarkeerde sprite door (ook transparante).
+    uint32_t or_them = 0;
+    for (int s = 31; s >= 0; s--) {
+        if (!(marked & (1u << s))) continue;
+        uint32_t a = SA + 4u * (uint32_t)s;
+        uint8_t yr = ctx->vram[a];
+        uint8_t k = (uint8_t)(yr - vscroll);
+        int sy = (k > 256 - IH) ? ((int)k + 1 - 256) : ((int)k + 1);
+        int ly = ln - sy;
+        if (mag) ly >>= 1;
+
+        uint8_t cb = ctx->vram[SC + 16u * (uint32_t)s + (uint32_t)ly];
+        or_them |= cb & 0x40;
+        bool or_mode = (or_them & 0x20) != 0;
+        uint32_t color = cb & 0x0F;
+        if (color) {
+            int sx = ctx->vram[a + 1];
+            if (cb & 0x80) sx -= 32; // EC per lijn
+            uint8_t pat = ctx->vram[a + 2];
+            for (int dx = 0; dx < OH; dx++) {
+                int xp = sx + dx;
+                if (xp < 0 || xp > 255) continue;
+                int lx = mag ? (dx >> 1) : dx;
+                uint32_t off;
+                if (size16) {
+                    // 16x16 = 4 patronen in TL/BL/TR/BR-volgorde.
+                    uint32_t pi = (uint32_t)(pat & 0xFC) + ((uint32_t)lx >> 3) * 2 + ((uint32_t)ly >> 3);
+                    off = pi * 8 + ((uint32_t)ly & 7);
+                } else {
+                    off = (uint32_t)pat * 8 + (uint32_t)ly;
+                }
+                if (ctx->vram[SG + off] & (0x80 >> (lx & 7))) {
+                    if (or_mode && ovr[xp] != 0xFF)
+                        ovr[xp] |= (uint8_t)color;
+                    else
+                        ovr[xp] = (uint8_t)color;
+                }
+            }
+        }
+        or_them >>= 1;
+    }
+}
+
 void __not_in_flash_func(v9938_render_line)(v9938_context_t *ctx, uint32_t *line, int ln)
 {
     uint32_t bdc = ctx->palette[BACKDROP_IDX(ctx)];
@@ -351,26 +508,62 @@ void __not_in_flash_func(v9938_render_line)(v9938_context_t *ctx, uint32_t *line
     int active_h = (ctx->regs[9] & 0x80) ? 212 : 192;
 
     uint32_t px[256];
-    bool wide = false; // 512-brede modes volgen in fase 2
+    uint8_t ovr[256];
+    int mode = v_mode(ctx);
+    bool wide = (mode == 0x10 || mode == 0x14 || mode == 0x09);
 
     if (ln >= active_h || BLANKED(ctx)) {
-        for (int k = 0; k < 256; k++) px[k] = bdc;
-    } else {
-        switch (v_mode(ctx)) {
-        case 0x01: render_t1(ctx, px, ln); break;
-        case 0x00: render_g1(ctx, px, ln); render_sprites_m1(ctx, px, ln); break;
-        case 0x04: render_g2(ctx, px, ln); render_sprites_m1(ctx, px, ln); break;
-        default:
-            // Nog niet geïmplementeerde mode: backdrop (fase 2: G3-G7, T2, MC).
-            for (int k = 0; k < 256; k++) px[k] = bdc;
-            break;
-        }
+        for (int k = 0; k < V9938_LINE_W; k++) line[k] = bdc;
+        return;
     }
 
-    if (!wide) {
-        for (int k = 0; k < 256; k++) {
-            line[2 * k] = px[k];
-            line[2 * k + 1] = px[k];
+    if (wide) {
+        // 512-brede modes: direct in de uitvoerbuffer.
+        switch (mode) {
+        case 0x10: render_g5(ctx, line, ln); break;
+        case 0x14: render_g6(ctx, line, ln); break;
+        case 0x09: render_t2(ctx, line, ln); return; // tekst: geen sprites
         }
+        render_sprites_m2(ctx, ovr, ln);
+        for (int k = 0; k < 256; k++) {
+            if (ovr[k] != 0xFF) {
+                line[2 * k] = ctx->palette[ovr[k]];
+                line[2 * k + 1] = ctx->palette[ovr[k]];
+            }
+        }
+        return;
+    }
+
+    switch (mode) {
+    case 0x01: render_t1(ctx, px, ln); break;
+    case 0x00: render_g1(ctx, px, ln); render_sprites_m1(ctx, px, ln); break;
+    case 0x04: render_g2(ctx, px, ln); render_sprites_m1(ctx, px, ln); break;
+    case 0x08: // G3 (screen 4): G2-layout met sprite mode 2
+        render_g2(ctx, px, ln);
+        render_sprites_m2(ctx, ovr, ln);
+        for (int k = 0; k < 256; k++)
+            if (ovr[k] != 0xFF) px[k] = ctx->palette[ovr[k]];
+        break;
+    case 0x0C: // G4 (screen 5)
+        render_g4(ctx, px, ln);
+        render_sprites_m2(ctx, ovr, ln);
+        for (int k = 0; k < 256; k++)
+            if (ovr[k] != 0xFF) px[k] = ctx->palette[ovr[k]];
+        break;
+    case 0x1C: // G7 (screen 8) — sprites: TODO vaste G7-spritekleuren
+        render_g7(ctx, px, ln);
+        render_sprites_m2(ctx, ovr, ln);
+        for (int k = 0; k < 256; k++)
+            if (ovr[k] != 0xFF) px[k] = ctx->palette[ovr[k]];
+        break;
+    default:
+        // MC (multicolor) en restmodes: backdrop.
+        for (int k = 0; k < 256; k++) px[k] = bdc;
+        break;
+    }
+
+    for (int k = 0; k < 256; k++) {
+        line[2 * k] = px[k];
+        line[2 * k + 1] = px[k];
     }
 }
