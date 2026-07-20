@@ -10,6 +10,7 @@
 #include "machine.h"
 #include "storage.h"
 #include "menu.h"
+#include "tms9918.h"
 #ifdef BAREMSX_MSX2
 #include "v9938.h"
 #endif
@@ -170,8 +171,10 @@ int main(int argc, char **argv)
     char diskrom_name[STORAGE_MAX_NAME] = "";
     char ext_name[STORAGE_MAX_NAME] = "";
 
-    // system/: "disk*" = DISK.ROM, "msx2ext*" = MSX2 sub-ROM (activeert het
-    // MSX2-profiel), het eerste andere bestand is de (hoofd-)BIOS.
+    // system/: "disk*" = DISK.ROM; "msx2ext*" = sub-ROM en "msx2*" = de
+    // MSX2-hoofd-BIOS (samen activeren ze het MSX2-profiel); het eerste
+    // overige bestand is de MSX1-BIOS. Beide sets mogen naast elkaar staan.
+    char msx2main_name[STORAGE_MAX_NAME] = "";
     int ns = storage_list(SD_SYSTEM, ent, 128);
     for (int i = 0; i < ns; i++) {
         if (ent[i].is_dir) continue;
@@ -179,11 +182,14 @@ int main(int argc, char **argv)
             if (!diskrom_name[0]) snprintf(diskrom_name, sizeof diskrom_name, "%s", ent[i].name);
         } else if (strncasecmp(ent[i].name, "msx2ext", 7) == 0) {
             if (!ext_name[0]) snprintf(ext_name, sizeof ext_name, "%s", ent[i].name);
+        } else if (strncasecmp(ent[i].name, "msx2", 4) == 0) {
+            if (!msx2main_name[0]) snprintf(msx2main_name, sizeof msx2main_name, "%s", ent[i].name);
         } else if (!bios_name[0]) {
             snprintf(bios_name, sizeof bios_name, "%s", ent[i].name);
         }
     }
-    bool msx2 = ext_name[0] != 0;
+    bool msx2 = ext_name[0] != 0 && msx2main_name[0] != 0;
+    if (msx2) snprintf(bios_name, sizeof bios_name, "%s", msx2main_name);
     if (!bios_name[0]) {
         fprintf(stderr, "no BIOS found in sdcard/%s/\n", SD_SYSTEM);
         return 1;
@@ -328,6 +334,23 @@ int main(int argc, char **argv)
         if (arg_frames > 0 && frame_no >= arg_frames) {
             // Beam-model: framebuffers zijn al gevuld door de sink.
             if (arg_dump) dump_ppm(arg_dump, msx2 ? fb2 : fb, dw, dh);
+#ifdef SCC_DEBUG
+            {
+                extern volatile uint32_t sccr_bf50_bank, sccr_bf50_val, sccr_bf50_hits;
+                fprintf(stderr, "[bf50] bank=%u val=%02X hits=%u\n",
+                        sccr_bf50_bank, sccr_bf50_val, sccr_bf50_hits);
+                {
+                    extern uint8_t ram[];
+                    fprintf(stderr, "[bf50] E1DE=%02X pc=%04X\n", ram[0xE1DE], machine_dbg_pc());
+                }
+                {
+                    extern tms9918_context_t tms9918;
+                    extern uint8_t ram[];
+                    fprintf(stderr, "[bf50] R1=%02X jiffy=%02X%02X\n",
+                            tms9918.registers[1], ram[0xFC9F], ram[0xFC9E]);
+                }
+            }
+#endif
 #ifdef BAREMSX_MSX2
             if (msx2) {
                 extern v9938_context_t v9938;

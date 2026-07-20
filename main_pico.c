@@ -78,6 +78,19 @@ static void machine_line_source(uint16_t *dst, int line, int *w)
     *w = machine_render_line_565(dst, line);
 }
 
+// Pacing-telemetrie (SWD-uitleesbaar): waar wacht de hoofdlus en wat ziet hij?
+volatile int dbg_pace_ln = -99, dbg_pace_scan = -99;
+volatile uint32_t dbg_core0_frames = 0;
+// XIP-integriteit: som van de eerste 4KB van het (gestagede) game-ROM,
+// per frame herberekend; mismatches tellen = runtime-XIP-corruptie.
+volatile uint32_t dbg_xip_ref = 0, dbg_xip_bad = 0, dbg_xip_checks = 0;
+static const uint8_t *dbg_xip_ptr = NULL;
+static uint32_t xip_sum(const uint8_t *p) {
+    uint32_t s = 0;
+    for (int i = 0; i < 4096; i++) s = (s * 33) ^ p[i];
+    return s;
+}
+
 int main(void)
 {
     enable_fpu(); // core 0 FPU aan vóór iets FP-achtigs draait (o.a. sleep_us-IRQ)
@@ -147,18 +160,25 @@ int main(void)
 #ifdef BAREMSX_SD
     static char diskrom_name[STORAGE_MAX_NAME];
     if (sd_ok) {
-        // system/: eerste bestand dat NIET "disk..." heet = BIOS (gepad naar
-        // 64KB); eerste dat wél zo heet = DISK.ROM (optioneel).
+        // system/: "disk*" = DISK.ROM, "msx2*" = MSX2-set (hoort bij het
+        // SDL/MSX2-profiel — de Pico draait nog MSX1 en moet die dus
+        // OVERSLAAN: een MSX2-BIOS op de TMS9918 boot naar een zwart
+        // scherm), eerste overige bestand = de MSX1-BIOS.
         char bios_name[STORAGE_MAX_NAME] = "";
+        bool saw_msx2 = false;
         int ns = storage_list(SD_SYSTEM, ent, 64);
         for (int i = 0; i < ns; i++) {
             if (ent[i].is_dir) continue;
             if (is_disk_rom_name(ent[i].name)) {
                 if (!diskrom_name[0]) snprintf(diskrom_name, sizeof diskrom_name, "%s", ent[i].name);
+            } else if (strncasecmp(ent[i].name, "msx2", 4) == 0) {
+                saw_msx2 = true; // genegeerd tot het MSX2-profiel op de Pico landt
             } else if (!bios_name[0]) {
                 snprintf(bios_name, sizeof bios_name, "%s", ent[i].name);
             }
         }
+        if (saw_msx2)
+            printf("[boot] msx2*-bestanden in system/ genegeerd (Pico draait MSX1-profiel)\n");
         if (bios_name[0]) {
             memset(sd_bios, 0xFF, sizeof sd_bios);
             storage_read(SD_SYSTEM, bios_name, sd_bios, sizeof sd_bios);
@@ -291,6 +311,11 @@ int main(void)
     // Machine draait: core 1 rendert vanaf nu live uit de VDP-state.
     video_hstx_set_line_source(machine_line_source, MSX_H);
 
+    if (use_game && use_game_size >= 4096) {
+        dbg_xip_ptr = use_game;
+        dbg_xip_ref = xip_sum(use_game);
+    }
+
     uint32_t emu_frames = 0;
     uint64_t sec_t0 = time_us_64();
 
@@ -307,6 +332,9 @@ int main(void)
         for (int ln = 0; ln < 262; ln++) {
             if (ln < MSX_H) {
                 while (video_hstx_scan_msx_line() < ln - 8) {
+                    extern volatile int dbg_pace_ln, dbg_pace_scan;
+                    dbg_pace_ln = ln;
+                    dbg_pace_scan = video_hstx_scan_msx_line();
 #ifdef BAREMSX_USB_KEYBOARD
                     usbkbd_task();
 #endif
@@ -318,7 +346,12 @@ int main(void)
 
         audio_hdmi_generate();   // emu-audio -> ring (core 1 pompt naar HDMI)
 
+        dbg_core0_frames++;
         emu_frames++;
+        if (dbg_xip_ptr) {
+            dbg_xip_checks++;
+            if (xip_sum(dbg_xip_ptr) != dbg_xip_ref) dbg_xip_bad++;
+        }
 
         // Frame-flank afwachten (de beam-pacing hierboven eindigt vlak na de
         // onderrand; dit lijnt het volgende frame uit).

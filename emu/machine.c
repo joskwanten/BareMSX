@@ -69,6 +69,16 @@ void machine_attach_disk(const uint8_t *disk_rom, uint32_t disk_rom_size,
 
 uint8_t psg_register = 0;
 
+#ifdef SCC_DEBUG
+volatile uint16_t scc_log_a[64], scc_log_pc[64];
+volatile uint8_t scc_log_v[64];
+volatile int scc_log_n = 0;
+volatile uint32_t sccr_bf50_bank, sccr_bf50_val, sccr_bf50_hits;
+volatile uint8_t r1_log_v[32];
+volatile uint16_t r1_log_pc[32];
+volatile int r1_log_n = 0;
+#endif
+
 // Beam-render-sink (zie machine.h). NULL = legacy snapshot-model.
 static machine_line_sink_t g_line_sink = NULL;
 void machine_set_line_sink(machine_line_sink_t sink) { g_line_sink = sink; }

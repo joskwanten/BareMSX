@@ -72,6 +72,22 @@ void __not_in_flash_func(tms9918_write)(tms9918_context_t *context, bool mode, u
             context->hasLatchedData = false;
             if (value & 0x80)
             {
+#ifdef SCC_DEBUG
+                if ((value & 0x7) == 1) {
+                    extern uint16_t machine_dbg_pc(void);
+                    extern volatile uint8_t r1_log_v[32];
+                    extern volatile uint16_t r1_log_pc[32];
+                    extern volatile int r1_log_n;
+                    if (r1_log_n < 32) {
+                        r1_log_v[r1_log_n] = context->latchedData;
+                        r1_log_pc[r1_log_n] = machine_dbg_pc();
+                        r1_log_n++;
+                    }
+#ifndef PICO_BUILD_NO_STDERR
+                    fprintf(stderr, "[r1] %02X pc=%04X\n", context->latchedData, machine_dbg_pc());
+#endif
+                }
+#endif
                 context->registers[value & 0x7] = context->latchedData;
                 // Interrupts net aangezet terwijl de F-flag al hangt? Dan de
                 // INT-lijn meteen asserteren (niet pas bij de volgende vblank).

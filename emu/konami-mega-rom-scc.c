@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <string.h>
 #include "konami-mega-rom-scc.h"
 #include "pico.h"
@@ -53,11 +54,41 @@ uint8_t __not_in_flash_func(scc_read)(void* context, uint16_t address)
     konami_scc_t* c = (konami_scc_t*)context;
     uint32_t page_index = (address >> 13) % 8;
     uint32_t page = c->selected_pages[page_index] & c->bank_mask; // masker tegen out-of-bounds
-    return c->rom[(page * SCC_PAGE_SIZE) + (address % SCC_PAGE_SIZE)];
+    uint8_t rv = c->rom[(page * SCC_PAGE_SIZE) + (address % SCC_PAGE_SIZE)];
+#ifdef SCC_DEBUG
+    {
+        // Eerste fetch op het F1SPIRIT-beslispunt: welke bank + welke byte?
+        extern volatile uint32_t sccr_bf50_bank, sccr_bf50_val, sccr_bf50_hits;
+        if (address == 0xBF50) {
+            if (sccr_bf50_hits == 0) { sccr_bf50_bank = page; sccr_bf50_val = rv; }
+            sccr_bf50_hits++;
+        }
+    }
+#endif
+    return rv;
 }
 
 void __not_in_flash_func(scc_write)(void* context, uint16_t address, uint8_t value)
 {
+#ifdef SCC_DEBUG
+    {
+        extern uint16_t machine_dbg_pc(void);
+        // RAM-log (SWD-uitleesbaar op de Pico) + stderr (SDL).
+        extern volatile uint16_t scc_log_a[64], scc_log_pc[64];
+        extern volatile uint8_t scc_log_v[64];
+        extern volatile int scc_log_n;
+        if (scc_log_n < 64 && address >= 0x5000) {
+            scc_log_a[scc_log_n] = address;
+            scc_log_v[scc_log_n] = value;
+            scc_log_pc[scc_log_n] = machine_dbg_pc();
+            scc_log_n++;
+#ifndef PICO_BUILD_NO_STDERR
+            fprintf(stderr, "[scc] w %04X=%02X pc=%04X\n", address, value, machine_dbg_pc());
+#endif
+        }
+    }
+#endif
+
     konami_scc_t* c = (konami_scc_t*)context;
     if (address % 0x2000 >= 0x1800) {
         if (c->selected_pages[(address >> 13) % 8] == 0x3f) {
