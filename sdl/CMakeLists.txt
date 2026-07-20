@@ -29,11 +29,14 @@ add_executable(msx_sdl
     ${ROOT}/emu/konami-mega-rom-scc.c
     ${ROOT}/emu/mapper.c
     ${ROOT}/emu/v9938.c
+    ${ROOT}/emu/rtc.c
+    ${ROOT}/emu/mappedram.c
     ${ROOT}/emu/wd2793.c
     ${ROOT}/emu/diskrom.c
     ${ROOT}/emu/emu2149.c
 )
 
+target_compile_definitions(msx_sdl PRIVATE BAREMSX_MSX2=1)
 target_compile_definitions(msx_sdl PRIVATE Z80_STATIC)
 
 target_include_directories(msx_sdl PRIVATE

@@ -15,6 +15,11 @@
 #include "mapper.h"
 #include "emu2149.h"
 #include "diskrom.h"
+#ifdef BAREMSX_MSX2
+#include "v9938.h"
+#include "rtc.h"
+#include "mappedram.h"
+#endif
 #include "pico.h"
 
 // Platform-agnostische machine: BIOS/cartridge komen via machine_init binnen.
@@ -40,6 +45,18 @@ PSG *psg; // AY-3-8910 (emu2149, integer)
 static diskrom_t diskrom;
 static bool disk_attached = false;
 
+// MSX2-profiel (alleen in builds met BAREMSX_MSX2 — de Pico-SRAM kan de
+// 2x128KB V9938-context + 128KB mapper-pool pas aan als PSRAM er is).
+static bool g_msx2 = false;
+bool machine_is_msx2(void) { return g_msx2; }
+#ifdef BAREMSX_MSX2
+v9938_context_t v9938;
+v9938_context_t v9938_snap; // snapshot voor de renderlus (zoals tms9918_snap)
+static rtc_t rtc;
+static mappedram_t mapram;
+static uint8_t mapram_pool[MAPPEDRAM_SIZE];
+#endif
+
 void machine_attach_disk(const uint8_t *disk_rom, uint32_t disk_rom_size,
                          uint8_t sides, uint32_t total_sectors,
                          void *io_ctx, wd_sector_io_t io)
@@ -63,6 +80,32 @@ static void gen_interrupt(void)
 
 static uint8_t __not_in_flash_func(read_port_impl)(uint8_t port)
 {
+#ifdef BAREMSX_MSX2
+    if (g_msx2) {
+        switch (port) {
+        case 0x98:
+            return v9938_read_data(&v9938);
+        case 0x99: {
+            uint8_t v = v9938_read_status(&v9938);
+            // S0-read ackt de frame-IRQ -> INT-lijn intrekken. (Lijn-IRQ-ack
+            // via S1 volgt zodra de lijn-granulaire lus er is.)
+            if ((v9938.regs[15] & 0x0F) == 0)
+                z80_int(&cpu, Z_FALSE);
+            return v;
+        }
+        case 0xb5:
+            return rtc_read(&rtc);
+        case 0xfc: case 0xfd: case 0xfe: case 0xff:
+            return mappedram_get_page(&mapram, port - 0xfc);
+        case 0xa8:
+            return slots_get_slot_register(&slots);
+        case 0xa9:
+            return ppi_read_a9(&ppi);
+        default:
+            return 0xff;
+        }
+    }
+#endif
     switch (port)
     {
     case 0x98:
@@ -84,6 +127,25 @@ static uint8_t __not_in_flash_func(read_port_impl)(uint8_t port)
 
 static void __not_in_flash_func(write_port_impl)(uint8_t port, uint8_t value)
 {
+#ifdef BAREMSX_MSX2
+    if (g_msx2) {
+        switch (port) {
+        case 0x98: v9938_write_data(&v9938, value); return;
+        case 0x99: v9938_write_ctrl(&v9938, value); return;
+        case 0x9a: v9938_write_palette(&v9938, value); return;
+        case 0x9b: v9938_write_indirect(&v9938, value); return;
+        case 0xb4: rtc_select(&rtc, value); return;
+        case 0xb5: rtc_write(&rtc, value); return;
+        case 0xfc: case 0xfd: case 0xfe: case 0xff:
+            mappedram_set_page(&mapram, port - 0xfc, value); return;
+        case 0xa0: psg_register = value; return;
+        case 0xa1: PSG_writeReg(psg, psg_register, value); return;
+        case 0xa8: slots_set_slot_register(&slots, value); return;
+        case 0xaa: ppi_write_aa(&ppi, value); return;
+        default: return;
+        }
+    }
+#endif
     switch (port)
     {
     case 0x98:
@@ -226,6 +288,78 @@ void __not_in_flash_func(machine_do_cycles)(void)
     z80_run(&cpu, CYC_PER_INT);
 }
 
+#ifdef BAREMSX_MSX2
+// MSX2-profiel: NMS-8245-achtige machine met de V9938.
+//   Slot 0:  MSX2-BIOS (32KB, 0x0000)
+//   Slot 1:  cartridge (zelfde mapper-pad als MSX1)
+//   Slot 2:  leeg (FM-PAC later)
+//   Slot 3:  expanded — 3-0 sub-ROM (EXT), 3-2 mapper-RAM (128KB, FC-FF)
+// bios/ext worden door de frontend als 64KB-gepadde buffers aangeleverd
+// (rom_read is bewust simpel en maskeert alleen op 16-bit).
+bool machine_init_msx2(const uint8_t *bios, uint32_t bios_size,
+                       const uint8_t *ext, uint32_t ext_size,
+                       const uint8_t *game, uint32_t game_size)
+{
+    (void)bios_size; (void)ext_size;
+    g_msx2 = true;
+
+    v9938_init(&v9938);
+    v9938_register_interrupt_func(&v9938, gen_interrupt);
+    rtc_init(&rtc);
+    mappedram_init(&mapram, mapram_pool);
+    scc_init(&konami_scc);
+
+    slots_add_slot(&slots, 0, (void *)bios, rom_read, rom_write);
+
+    mapper_type_t mt = mapper_detect(game, game_size);
+    printf("[machine] msx2: cartridge mapper: %s (%u bytes)\n", mapper_name(mt), (unsigned)game_size);
+    if (mt == MAPPER_KONAMI_SCC) {
+        scc_set_rom(&konami_scc, (uint8_t *)game, game_size);
+        slots_add_slot(&slots, 1, &konami_scc, scc_read, scc_write);
+    } else if (mt != MAPPER_NONE) {
+        mapper_init(&cart, game, game_size, mt);
+        slots_add_slot(&slots, 1, &cart, mapper_read, mapper_write);
+    } else {
+        slots_add_slot(&slots, 1, NULL, empty_read, empty_write);
+    }
+    slots_add_slot(&slots, 2, NULL, empty_read, empty_write);
+
+    subslots3.subslot_register = 0;
+    subslots_add_subslot(&subslots3, 0, (void *)ext, rom_read, rom_write); // sub-ROM
+    subslots_add_subslot(&subslots3, 1, NULL, empty_read, empty_write);
+    subslots_add_subslot(&subslots3, 2, &mapram, mappedram_read, mappedram_write);
+    subslots_add_subslot(&subslots3, 3, NULL, empty_read, empty_write);
+    slots_add_slot(&slots, 3, &subslots3, subslots_read, subslots_write);
+
+    cpu.context = &slots;
+    cpu.fetch_opcode = cpu.fetch = cpu.nop = cpu.read = (Z80Read)slots_read;
+    cpu.write = (Z80Write)slots_write;
+    cpu.in = zeta_in;
+    cpu.out = zeta_out;
+    cpu.halt = Z_NULL;
+    cpu.nmia = Z_NULL;
+    cpu.inta = Z_NULL;
+    cpu.int_fetch = Z_NULL;
+    cpu.ld_i_a = Z_NULL;
+    cpu.ld_r_a = Z_NULL;
+    cpu.reti = Z_NULL;
+    cpu.retn = Z_NULL;
+    cpu.hook = Z_NULL;
+    cpu.illegal = Z_NULL;
+    cpu.options = Z80_MODEL_ZILOG_NMOS;
+    z80_power(&cpu, Z_TRUE);
+    z80_instant_reset(&cpu);
+
+    psg = PSG_new(3579545, AUDIO_SAMPLE_RATE);
+    if (!psg) return false;
+    PSG_setVolumeMode(psg, EMU2149_VOL_AY_3_8910);
+    PSG_set_quality(psg, 0);
+    PSG_reset(psg);
+
+    return true;
+}
+#endif // BAREMSX_MSX2
+
 // Dump de Z80/VDP-staat (via de Delete-toets bij een hang).
 void machine_dbg_dump(void)
 {
@@ -247,6 +381,12 @@ void machine_dbg_dump(void)
 
 void machine_generate_interrupt(void)
 {
+#ifdef BAREMSX_MSX2
+    if (g_msx2) {
+        v9938_vblank(&v9938);
+        return;
+    }
+#endif
     check_and_generate_interrupt(&tms9918);
 }
 
@@ -264,6 +404,12 @@ void machine_get_rendered_line(uint32_t *line, int y)
 // Core 0 kopieert de live VDP-state; core 1 rendert uit de snapshot.
 void machine_snapshot_vdp(void)
 {
+#ifdef BAREMSX_MSX2
+    if (g_msx2) {
+        memcpy(&v9938_snap, &v9938, sizeof(v9938_context_t));
+        return;
+    }
+#endif
     memcpy(&tms9918_snap, &tms9918, sizeof(tms9918_context_t));
 }
 
@@ -272,8 +418,24 @@ void __not_in_flash_func(machine_render_snapshot_line)(uint32_t *line, int y)
     tms9918_render_line(&tms9918_snap, line, y);
 }
 
+// MSX2: displaygeometrie + 512-brede lijnrender uit de snapshot.
+// (Literals i.p.v. V9938_LINE_W/V9938_LINES: v9938.h bestaat niet in
+// MSX1-only builds en g_msx2 is daar altijd false.)
+int machine_display_width(void)  { return g_msx2 ? 512 : 256; }
+int machine_display_height(void) { return g_msx2 ? 212 : 192; }
+
+#ifdef BAREMSX_MSX2
+void machine_render_snapshot_line_wide(uint32_t *line, int y)
+{
+    v9938_render_line(&v9938_snap, line, y);
+}
+#endif
+
 uint32_t machine_snapshot_background_color(void)
 {
+#ifdef BAREMSX_MSX2
+    if (g_msx2) return v9938_backdrop_color(&v9938_snap);
+#endif
     return tms9918_get_backdrop_color(&tms9918_snap);
 }
 

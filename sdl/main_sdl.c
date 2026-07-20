@@ -10,6 +10,9 @@
 #include "machine.h"
 #include "storage.h"
 #include "menu.h"
+#ifdef BAREMSX_MSX2
+#include "v9938.h"
+#endif
 
 #include <stdlib.h>
 
@@ -84,14 +87,14 @@ static int dsk_sector_io(void *ctx, uint32_t lba, uint8_t *buf, bool write)
     return n == 512 ? 0 : -1;
 }
 
-// Dump het ARGB-framebuffer als PPM (headless test: kijken wat er op het
+// Dump een ARGB-framebuffer als PPM (headless test: kijken wat er op het
 // scherm staat zonder venster-interactie).
-static void dump_ppm(const char *path, const uint32_t *fb)
+static void dump_ppm(const char *path, const uint32_t *fb, int w, int h)
 {
     FILE *f = fopen(path, "wb");
     if (!f) return;
-    fprintf(f, "P6\n%d %d\n255\n", MSX_W, MSX_H);
-    for (int i = 0; i < MSX_W * MSX_H; i++) {
+    fprintf(f, "P6\n%d %d\n255\n", w, h);
+    for (int i = 0; i < w * h; i++) {
         uint8_t px[3] = { (fb[i] >> 16) & 0xFF, (fb[i] >> 8) & 0xFF, fb[i] & 0xFF };
         fwrite(px, 1, 3, f);
     }
@@ -155,18 +158,22 @@ int main(int argc, char **argv)
     storage_entry_t ent[128];
     char bios_name[STORAGE_MAX_NAME] = "";
     char diskrom_name[STORAGE_MAX_NAME] = "";
+    char ext_name[STORAGE_MAX_NAME] = "";
 
-    // system/: het eerste bestand dat NIET "disk..." heet is de BIOS; het
-    // eerste dat wél zo heet is de DISK.ROM (optioneel).
+    // system/: "disk*" = DISK.ROM, "msx2ext*" = MSX2 sub-ROM (activeert het
+    // MSX2-profiel), het eerste andere bestand is de (hoofd-)BIOS.
     int ns = storage_list(SD_SYSTEM, ent, 128);
     for (int i = 0; i < ns; i++) {
         if (ent[i].is_dir) continue;
         if (is_disk_rom_name(ent[i].name)) {
             if (!diskrom_name[0]) snprintf(diskrom_name, sizeof diskrom_name, "%s", ent[i].name);
+        } else if (strncasecmp(ent[i].name, "msx2ext", 7) == 0) {
+            if (!ext_name[0]) snprintf(ext_name, sizeof ext_name, "%s", ent[i].name);
         } else if (!bios_name[0]) {
             snprintf(bios_name, sizeof bios_name, "%s", ent[i].name);
         }
     }
+    bool msx2 = ext_name[0] != 0;
     if (!bios_name[0]) {
         fprintf(stderr, "no BIOS found in sdcard/%s/\n", SD_SYSTEM);
         return 1;
@@ -187,6 +194,16 @@ int main(int argc, char **argv)
         memset(disk_rom, 0xFF, sizeof disk_rom);
         disk_rom_size = storage_read(SD_SYSTEM, diskrom_name, disk_rom, sizeof disk_rom);
         if (disk_rom_size < 0) disk_rom_size = 0;
+    }
+
+    // MSX2 sub-ROM -> 64 KB gepadde buffer (rom_read maskeert op 16-bit).
+    static uint8_t ext_rom[65536];
+    if (msx2) {
+        memset(ext_rom, 0xFF, sizeof ext_rom);
+        if (storage_read(SD_SYSTEM, ext_name, ext_rom, sizeof ext_rom) < 0) {
+            fprintf(stderr, "failed to read sub-ROM %s\n", ext_name);
+            return 1;
+        }
     }
 
     // --- Boot menu: pick cartridges / disks ---
@@ -259,16 +276,31 @@ int main(int argc, char **argv)
                             NULL, dsk_sector_io);
     }
 
-    printf("BIOS: system/%s   diskrom: %s   slot1: %s (%u)   slot2: %s (%u)   diskA: %s\n",
-           bios_name, diskrom_name[0] ? diskrom_name : "(none)",
+    printf("BIOS: system/%s%s   diskrom: %s   slot1: %s (%u)   slot2: %s (%u)   diskA: %s\n",
+           bios_name, msx2 ? " [MSX2]" : "", diskrom_name[0] ? diskrom_name : "(none)",
            cfg.slot1[0] ? cfg.slot1 : "(empty)", game_size,
            cfg.slot2[0] ? cfg.slot2 : "(empty)", game2_size,
            cfg.diskA[0] ? cfg.diskA : "(empty)");
 
-    if (!machine_init(bios, sizeof bios, game, game_size, game2, game2_size)) {
+    bool ok = msx2
+        ? machine_init_msx2(bios, sizeof bios, ext_rom, sizeof ext_rom, game, game_size)
+        : machine_init(bios, sizeof bios, game, game_size, game2, game2_size);
+    if (!ok) {
         fprintf(stderr, "machine_init failed\n");
         return 1;
     }
+
+    // MSX2: 512x212-display -> texture + venster hierop aanpassen.
+    int dw = machine_display_width(), dh = machine_display_height();
+    if (dw != MSX_W || dh != MSX_H) {
+        SDL_DestroyTexture(tex);
+        tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888,
+                                SDL_TEXTUREACCESS_STREAMING, dw, dh);
+        SDL_RenderSetLogicalSize(ren, dw, dh * 2); // 512 breed = halve pixels
+        SDL_SetWindowSize(win, dw * 3 / 2, dh * 3);
+    }
+    static uint32_t fb2[512 * 212];  // MSX2-framebuffer
+    static uint32_t line2[512];
 
     const double freq = (double)SDL_GetPerformanceFrequency();
     uint64_t next = SDL_GetPerformanceCounter();
@@ -279,11 +311,29 @@ int main(int argc, char **argv)
         // Headless test: na N frames het scherm dumpen en stoppen.
         if (arg_frames > 0 && frame_no >= arg_frames) {
             machine_snapshot_vdp();
-            for (int y = 0; y < MSX_H; y++) {
-                machine_render_snapshot_line(line, y);
-                memcpy(&fb[y * MSX_W], line, sizeof(line));
+            if (msx2) {
+                for (int y = 0; y < dh; y++) {
+                    machine_render_snapshot_line_wide(line2, y);
+                    memcpy(&fb2[y * dw], line2, (size_t)dw * sizeof(uint32_t));
+                }
+                if (arg_dump) dump_ppm(arg_dump, fb2, dw, dh);
+            } else {
+                for (int y = 0; y < MSX_H; y++) {
+                    machine_render_snapshot_line(line, y);
+                    memcpy(&fb[y * MSX_W], line, sizeof(line));
+                }
+                if (arg_dump) dump_ppm(arg_dump, fb, MSX_W, MSX_H);
             }
-            if (arg_dump) dump_ppm(arg_dump, fb);
+#ifdef BAREMSX_MSX2
+            if (msx2) {
+                extern v9938_context_t v9938;
+                fprintf(stderr, "[vdp] R0=%02X R1=%02X R7=%02X R9=%02X mode=%02X pc=%04X\n",
+                        v9938.regs[0], v9938.regs[1], v9938.regs[7], v9938.regs[9],
+                        ((v9938.regs[1] >> 4) & 1) | ((v9938.regs[1] >> 2) & 2) | ((v9938.regs[0] & 0x0E) << 1),
+                        machine_dbg_pc());
+            }
+#endif
+            if (0)
             {
                 extern uint8_t ram[];
                 fprintf(stderr, "[ram] 5650:");
@@ -327,11 +377,19 @@ int main(int argc, char **argv)
 
         // Render the VDP snapshot into the texture.
         machine_snapshot_vdp();
-        for (int y = 0; y < MSX_H; y++) {
-            machine_render_snapshot_line(line, y);
-            memcpy(&fb[y * MSX_W], line, sizeof(line));
+        if (msx2) {
+            for (int y = 0; y < dh; y++) {
+                machine_render_snapshot_line_wide(line2, y);
+                memcpy(&fb2[y * dw], line2, (size_t)dw * sizeof(uint32_t));
+            }
+            SDL_UpdateTexture(tex, NULL, fb2, dw * (int)sizeof(uint32_t));
+        } else {
+            for (int y = 0; y < MSX_H; y++) {
+                machine_render_snapshot_line(line, y);
+                memcpy(&fb[y * MSX_W], line, sizeof(line));
+            }
+            SDL_UpdateTexture(tex, NULL, fb, MSX_W * (int)sizeof(uint32_t));
         }
-        SDL_UpdateTexture(tex, NULL, fb, MSX_W * (int)sizeof(uint32_t));
         SDL_RenderClear(ren);
         SDL_RenderCopy(ren, tex, NULL, NULL);
         SDL_RenderPresent(ren);

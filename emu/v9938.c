@@ -161,6 +161,12 @@ uint8_t __not_in_flash_func(v9938_read_status)(v9938_context_t *ctx) // 0x99 in
         ctx->status[1] &= (uint8_t)~S1_FH;
         ctx->line_irq_pending = false;
         break;
+    case 2:
+        // Zonder scanline-klok (komt in de lijn-granulaire lus) wisselen we
+        // VR/HR per read: flank-wachtlussen (bijv. de bootlogo-pacing van de
+        // Philips-BIOS) zien dan altijd een overgang i.p.v. eeuwig VR=1.
+        ctx->status[2] ^= (uint8_t)(S2_VR | S2_HR);
+        break;
     default:
         break;
     }
