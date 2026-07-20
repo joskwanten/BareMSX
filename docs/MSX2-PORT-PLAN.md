@@ -4,8 +4,19 @@ Doel: MSX2 (V9938) als tweede machineprofiel, eerst op SDL, daarna Pico
 (vereist PSRAM op de WeAct — 128KB VRAM + 128KB mapper-RAM past niet meer
 naast de framebuffers in 520KB SRAM).
 
-Bron: de eigen msx_rs-emulator (Rust). Betrouwbaar gebleken eerder bij de
-WD2793-port. Locatie: `~/Projects/rust/msx_rs/`.
+## Bronnen en licenties
+
+- **Structuur/codebasis: msx_rs** (eigen werk, dus vrij te porten) —
+  `~/Projects/rust/msx_rs/`. Eerder betrouwbaar gebleken bij de WD2793-port.
+  Kanttekening: bevat bekende glitches (o.a. Quarth), vooral rond de
+  command-engine-timing t.o.v. de beam — die delen NIET 1-op-1 porten.
+- **Primaire spec: de V9938 Technical Data Book** (Yamaha/ASCII). Bij elke
+  twijfel wint de datasheet.
+- **Gedragsreferentie: openMSX** (en waar handig fMSX) — raadplegen om
+  hardwaregedrag te begrijpen, met nette vermelding in de documentatie.
+  NOOIT code overnemen of vertalen: openMSX is GPL-2.0 en fMSX
+  non-commercieel; afgeleide code zou de MIT-licentie van BareMSX breken.
+  Lezen → begrijpen → zelf formuleren.
 
 ## Wat waar leeft in msx_rs
 
@@ -38,7 +49,10 @@ WD2793-port. Locatie: `~/Projects/rust/msx_rs/`.
    legacy-modes (T1/G1/G2) door de bestaande tms9918-renderers heen.
    Mijlpaal: NMS8245-BIOS boot naar BASIC op SDL.
 2. **Bitmap-modes + sprite mode 2** uit vdp.wgsl. Mijlpaal: screen 5-games.
-3. **Command-engine** uit vdp.rs (veel MSX2-games zijn er afhankelijk van).
+3. **Command-engine**: structuur uit vdp.rs, maar gedrag en timing
+   spec-first (datasheet + openMSX-kruispeiling) — hier zitten de bekende
+   msx_rs-glitches (Quarth: command-busy versus beam, split-registers,
+   page-flip-cadans). Testplan: Quarth als lakmoesproef.
 4. **Machine**: mapper-RAM, sub-ROM, RTC, lijn-granulaire emulatielus
    (228 T-states/lijn i.p.v. frame-in-één-keer — nodig voor lijn-IRQs),
    machineprofiel-keuze (MSX1/MSX2 o.b.v. system/-inhoud), menu.
