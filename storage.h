@@ -21,6 +21,7 @@
 #define SD_ROMS   "roms"
 #define SD_DSK    "dsk"
 #define SD_HDD    "hdd"
+#define SD_CACHE  "cache" // uitgepakte .zip-inhoud (aangemaakt indien nodig)
 
 typedef struct {
     char name[STORAGE_MAX_NAME];
@@ -45,9 +46,14 @@ long storage_read(const char *dir, const char *name, uint8_t *buf, size_t max);
 // (short at EOF), or -1. Used for chunked reads (e.g. staging ROMs to flash).
 long storage_read_at(const char *dir, const char *name, uint32_t off, uint8_t *buf, size_t len);
 
-// Write `len` bytes at byte-offset `off` into an EXISTING dir/name (the file
-// is not created or grown). Returns bytes written, or -1. Used for .dsk writes.
+// Write `len` bytes at byte-offset `off` into an EXISTING dir/name; writing
+// at/na EOF laat het bestand groeien. Returns bytes written, or -1.
+// Used for .dsk writes and for streaming zip-extractie naar cache/.
 long storage_write_at(const char *dir, const char *name, uint32_t off, const uint8_t *buf, size_t len);
+
+// Maak dir/name aan als leeg bestand (truncate als het al bestaat); de map
+// wordt zo nodig aangemaakt. Returns false on error.
+bool storage_create(const char *dir, const char *name);
 
 // Allocate a buffer of the file's size, read the whole file into it, and return
 // it (caller frees). *size receives the byte count. Returns NULL on error.

@@ -29,6 +29,8 @@ add_executable(msx_sdl
     ${ROOT}/emu/konami-mega-rom-scc.c
     ${ROOT}/emu/mapper.c
     ${ROOT}/emu/v9938.c
+    ${ROOT}/zip.c
+    ${ROOT}/third_party/miniz/miniz.c
     ${ROOT}/emu/rtc.c
     ${ROOT}/emu/mappedram.c
     ${ROOT}/emu/wd2793.c
@@ -45,6 +47,13 @@ target_include_directories(msx_sdl PRIVATE
     ${ROOT}                            # storage.h
     ${ROOT}/emu
     ${ROOT}/zeta
+    ${ROOT}/third_party/miniz
 )
+
+# miniz: alleen de inflate-kern (tinfl) + crc32; geen stdio/tijd/archief-API's
+# (we hebben een eigen minimale zip-parser in zip.c).
+target_compile_definitions(msx_sdl PRIVATE
+    MINIZ_NO_STDIO MINIZ_NO_TIME MINIZ_NO_ARCHIVE_APIS MINIZ_NO_DEFLATE_APIS
+    MINIZ_NO_ZLIB_COMPATIBLE_NAMES)
 
 target_link_libraries(msx_sdl SDL2::SDL2 SDL2::SDL2main)

@@ -13,6 +13,7 @@
 #endif
 #ifdef BAREMSX_SD
 #include "storage.h"
+#include "zip.h"
 #include "menu.h"
 #include "flash_stage.h"
 #include "hardware/watchdog.h"
@@ -33,12 +34,13 @@ static bool is_disk_rom_name(const char *n)
 
 // Sector-IO voor de WD2793: leest/schrijft het geselecteerde .dsk-image op SD.
 static char g_dsk_name[STORAGE_MAX_NAME];
+static const char *g_dsk_dir = SD_DSK; // SD_CACHE voor een uit .zip gepakte .dsk
 static int dsk_sector_io(void *ctx, uint32_t lba, uint8_t *buf, bool write)
 {
     (void)ctx;
     long n = write
-        ? storage_write_at(SD_DSK, g_dsk_name, lba * 512u, buf, 512)
-        : storage_read_at(SD_DSK, g_dsk_name, lba * 512u, buf, 512);
+        ? storage_write_at(g_dsk_dir, g_dsk_name, lba * 512u, buf, 512)
+        : storage_read_at(g_dsk_dir, g_dsk_name, lba * 512u, buf, 512);
     return n == 512 ? 0 : -1;
 }
 #endif
@@ -68,6 +70,27 @@ static inline void enable_fpu(void) {
 // het V9938-VRAM (machine_init_msx2 wist 'm — het menu is dan klaar).
 static uint8_t vdp_arena[128 * 1024] __attribute__((aligned(4)));
 #define menu_fb ((uint16_t *)vdp_arena)
+#ifdef BAREMSX_SD
+// .zip-transparantie: pak bij selectie de eerste passende entry uit naar
+// cache/ en vervang de naam in-place; retourneert de map om uit te laden.
+// Het 32KB-inflatevenster is de staart van de vdp_arena: vrij zolang alleen
+// het menu (96KB) rendert, en helemaal vrij in het pre-video-stagingpad.
+static const char *ZIPROM_EXTS[] = {".rom", ".mx1", ".mx2", ".bin", NULL};
+static const char *ZIPDSK_EXTS[] = {".dsk", NULL};
+static const char *maybe_unzip(const char *dir, char *name_io, const char *const *exts)
+{
+    if (!zip_is_zip(name_io)) return dir;
+    char cached[STORAGE_MAX_NAME];
+    if (!zip_extract_cached(dir, name_io, exts, vdp_arena + 96 * 1024, cached, sizeof cached)) {
+        printf("[zip] geen bruikbare entry in %s/%s\n", dir, name_io);
+        return dir; // gewone laadfout volgt
+    }
+    printf("[zip] %s -> cache/%s\n", name_io, cached);
+    snprintf(name_io, STORAGE_MAX_NAME, "%s", cached);
+    return SD_CACHE;
+}
+#endif
+
 static void menu_line_source(uint16_t *dst, int line, int *w)
 {
     memcpy(dst, &menu_fb[line * MSX_W], MSX_W * sizeof(uint16_t));
@@ -155,9 +178,15 @@ int main(void)
             if ((int)(didx - 1) < nd && !ent[didx - 1].is_dir)
                 snprintf(g_dsk_name, sizeof g_dsk_name, "%s", ent[didx - 1].name);
         }
+        if (didx && g_dsk_name[0])
+            g_dsk_dir = maybe_unzip(SD_DSK, g_dsk_name, ZIPDSK_EXTS);
         int nr = storage_list(SD_ROMS, ent, 64);
-        if ((int)idx < nr && !ent[idx].is_dir)
-            staged_game = flash_stage_rom(SD_ROMS, ent[idx].name, &staged_size);
+        if ((int)idx < nr && !ent[idx].is_dir) {
+            char nm[STORAGE_MAX_NAME];
+            snprintf(nm, sizeof nm, "%s", ent[idx].name);
+            const char *d = maybe_unzip(SD_ROMS, nm, ZIPROM_EXTS);
+            staged_game = flash_stage_rom(d, nm, &staged_size);
+        }
     }
 #endif
 
@@ -237,18 +266,27 @@ int main(void)
                 }
                 usbkbd_menu_mode(false);
 
-                if (cfg.diskA[0])
+                if (cfg.diskA[0]) {
+                    // cfg.diskA blijft de menunaam (nodig voor de reboot-
+                    // index); g_dsk_name wordt de echte (evt. cache-)naam.
                     snprintf(g_dsk_name, sizeof g_dsk_name, "%s", cfg.diskA);
+                    g_dsk_dir = maybe_unzip(SD_DSK, g_dsk_name, ZIPDSK_EXTS);
+                }
 
                 use_game = NULL;
                 use_game_size = 0;
                 if (cfg.slot1[0]) {
+                    // .zip? Eerst uitpakken; de menunaam blijft bewaard voor
+                    // de reboot-staging-index in roms/.
+                    char slot1_menu[STORAGE_MAX_NAME];
+                    snprintf(slot1_menu, sizeof slot1_menu, "%s", cfg.slot1);
+                    const char *slot1_dir = maybe_unzip(SD_ROMS, cfg.slot1, ZIPROM_EXTS);
                     // 1. Kleine ROM: in RAM laden (snel, geen flash-slijtage).
                     //    NB: eerst de grootte checken — een te grote malloc
                     //    PANICt op de Pico (PICO_MALLOC_PANIC) i.p.v. NULL.
-                    long sz = storage_size(SD_ROMS, cfg.slot1);
-                    if (sz > 0 && sz <= 48 * 1024)
-                        use_game = storage_load(SD_ROMS, cfg.slot1, &use_game_size);
+                    long sz = storage_size(slot1_dir, cfg.slot1);
+                    if (sz > 0 && sz <= 40 * 1024)
+                        use_game = storage_load(slot1_dir, cfg.slot1, &use_game_size);
                     // 2. Groot: staat 'ie al in de flash-stage van een vorige keer?
                     if (!use_game)
                         use_game = flash_stage_get(cfg.slot1, &use_game_size);
@@ -269,7 +307,7 @@ int main(void)
                                 if (!ent[i].is_dir && strcmp(ent[i].name, cfg.slot2) == 0) { sidx2 = (uint32_t)i + 1; break; }
                         }
                         for (int i = 0; i < nr; i++) {
-                            if (!ent[i].is_dir && strcmp(ent[i].name, cfg.slot1) == 0) {
+                            if (!ent[i].is_dir && strcmp(ent[i].name, slot1_menu) == 0) {
                                 watchdog_hw->scratch[0] = BOOT_STAGE_MAGIC;
                                 watchdog_hw->scratch[1] = (uint32_t)i;
                                 watchdog_hw->scratch[2] = didx;
@@ -289,9 +327,10 @@ int main(void)
     if (sd_ok && cfg.slot2[0] && boot_msx2)
         printf("[boot] slot 2 genegeerd (MSX2-profiel heeft nog geen slot 2)\n");
     if (sd_ok && cfg.slot2[0] && !boot_msx2) {
-        long sz2 = storage_size(SD_ROMS, cfg.slot2);
-        if (sz2 > 0 && sz2 <= 48 * 1024)
-            use_game2 = storage_load(SD_ROMS, cfg.slot2, &use_game2_size);
+        const char *slot2_dir = maybe_unzip(SD_ROMS, cfg.slot2, ZIPROM_EXTS);
+        long sz2 = storage_size(SD_ROMS == slot2_dir ? SD_ROMS : SD_CACHE, cfg.slot2);
+        if (sz2 > 0 && sz2 <= 40 * 1024)
+            use_game2 = storage_load(slot2_dir, cfg.slot2, &use_game2_size);
         if (!use_game2) {
             printf("[boot] slot 2: %s laadt niet (max 48KB via RAM) -> leeg\n", cfg.slot2);
             use_game2_size = 0;
@@ -307,7 +346,7 @@ int main(void)
             uint8_t sides = 0;
             uint32_t total_sectors = 0;
             if (g_dsk_name[0]) {
-                long dsz = storage_size(SD_DSK, g_dsk_name);
+                long dsz = storage_size(g_dsk_dir, g_dsk_name);
                 if (dsz > 0) {
                     total_sectors = (uint32_t)dsz / 512u;
                     sides = (dsz <= 80 * 9 * 512) ? 1 : 2; // 360KB enkel-, 720KB dubbelzijdig

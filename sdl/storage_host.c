@@ -131,6 +131,18 @@ long storage_write_at(const char *dir, const char *name, uint32_t off, const uin
     return (long)w;
 }
 
+bool storage_create(const char *dir, const char *name)
+{
+    char path[1024];
+    path_of(path, sizeof path, dir, NULL);
+    mkdir(path, 0755); // bestaat al -> prima
+    path_of(path, sizeof path, dir, name);
+    FILE *f = fopen(path, "wb");
+    if (!f) return false;
+    fclose(f);
+    return true;
+}
+
 uint8_t *storage_load(const char *dir, const char *name, uint32_t *size)
 {
     long sz = storage_size(dir, name);

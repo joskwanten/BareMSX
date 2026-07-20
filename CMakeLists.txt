@@ -54,6 +54,8 @@ add_executable(BareMSX
         emu/konami-mega-rom-scc.c
         emu/mapper.c
         emu/v9938.c
+        zip.c
+        third_party/miniz/miniz.c
         emu/rtc.c
         emu/mappedram.c
         emu/wd2793.c
@@ -78,6 +80,7 @@ target_include_directories(BareMSX PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
         ${CMAKE_CURRENT_LIST_DIR}/emu
         ${CMAKE_CURRENT_LIST_DIR}/zeta
+        ${CMAKE_CURRENT_LIST_DIR}/third_party/miniz
 )
 
 # Zeta Z80 core wordt statisch mee-gecompileerd
@@ -86,6 +89,11 @@ target_compile_definitions(BareMSX PRIVATE Z80_STATIC)
 # Een gefaalde malloc moet NULL teruggeven (het ROM-laadpad handelt dat af),
 # niet panicken (SDK-default) — dat gaf een stille lockup bij grote ROMs.
 target_compile_definitions(BareMSX PRIVATE PICO_MALLOC_PANIC=0)
+
+# miniz: alleen de inflate-kern (tinfl) + crc32 voor zip.c (eigen zip-parser).
+target_compile_definitions(BareMSX PRIVATE
+    MINIZ_NO_STDIO MINIZ_NO_TIME MINIZ_NO_ARCHIVE_APIS MINIZ_NO_DEFLATE_APIS
+    MINIZ_NO_ZLIB_COMPATIBLE_NAMES)
 
 # MSX2-profiel (V9938 + mapper-RAM + RTC); boot als system/ zowel msx2* als
 # msx2ext* bevat. Het V9938-VRAM hergebruikt de 128KB menu-arena.

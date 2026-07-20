@@ -9,6 +9,7 @@
 
 #include "machine.h"
 #include "storage.h"
+#include "zip.h"
 #include "menu.h"
 #include "tms9918.h"
 #ifdef BAREMSX_MSX2
@@ -79,13 +80,33 @@ static bool is_disk_rom_name(const char *n)
 
 // Sector-IO voor de WD2793: leest/schrijft het geselecteerde .dsk-image.
 static char g_dsk_name[STORAGE_MAX_NAME];
+static const char *g_dsk_dir = SD_DSK; // SD_CACHE voor uit een .zip gepakte .dsk
 static int dsk_sector_io(void *ctx, uint32_t lba, uint8_t *buf, bool write)
 {
     (void)ctx;
     long n = write
-        ? storage_write_at(SD_DSK, g_dsk_name, lba * 512u, buf, 512)
-        : storage_read_at(SD_DSK, g_dsk_name, lba * 512u, buf, 512);
+        ? storage_write_at(g_dsk_dir, g_dsk_name, lba * 512u, buf, 512)
+        : storage_read_at(g_dsk_dir, g_dsk_name, lba * 512u, buf, 512);
     return n == 512 ? 0 : -1;
+}
+
+// --- .zip-transparantie: bij selectie uitpakken naar cache/ ---
+static uint8_t zip_window[ZIP_WINDOW_SIZE];
+static const char *ROM_EXTS[] = {".rom", ".mx1", ".mx2", ".bin", NULL};
+static const char *DSK_EXTS[] = {".dsk", NULL};
+// Is name_io een .zip, pak dan de eerste passende entry uit en vervang
+// name_io door de cachenaam; retourneert de map om uit te laden.
+static const char *maybe_unzip(const char *dir, char *name_io, const char *const *exts)
+{
+    if (!zip_is_zip(name_io)) return dir;
+    char cached[STORAGE_MAX_NAME];
+    if (!zip_extract_cached(dir, name_io, exts, zip_window, cached, sizeof cached)) {
+        fprintf(stderr, "zip: geen bruikbare entry in %s/%s\n", dir, name_io);
+        return dir; // gewone laadfout volgt
+    }
+    printf("[zip] %s -> cache/%s\n", name_io, cached);
+    snprintf(name_io, STORAGE_MAX_NAME, "%s", cached);
+    return SD_CACHE;
 }
 
 // Beam-sink: machine_do_cycles levert elke lijn (live VRAM, beam-positie);
@@ -258,7 +279,8 @@ int main(int argc, char **argv)
     uint8_t *game = NULL;
     uint32_t game_size = 0;
     if (cfg.slot1[0]) {
-        game = storage_load(SD_ROMS, cfg.slot1, &game_size);
+        const char *d1 = maybe_unzip(SD_ROMS, cfg.slot1, ROM_EXTS);
+        game = storage_load(d1, cfg.slot1, &game_size);
         if (!game) {
             fprintf(stderr, "failed to load roms/%s\n", cfg.slot1);
             return 1;
@@ -267,7 +289,8 @@ int main(int argc, char **argv)
     uint8_t *game2 = NULL;
     uint32_t game2_size = 0;
     if (cfg.slot2[0]) {
-        game2 = storage_load(SD_ROMS, cfg.slot2, &game2_size);
+        const char *d2 = maybe_unzip(SD_ROMS, cfg.slot2, ROM_EXTS);
+        game2 = storage_load(d2, cfg.slot2, &game2_size);
         if (!game2) {
             fprintf(stderr, "failed to load roms/%s\n", cfg.slot2);
             return 1;
@@ -279,7 +302,8 @@ int main(int argc, char **argv)
         uint8_t sides = 0;
         uint32_t total_sectors = 0;
         if (cfg.diskA[0]) {
-            long dsz = storage_size(SD_DSK, cfg.diskA);
+            g_dsk_dir = maybe_unzip(SD_DSK, cfg.diskA, DSK_EXTS);
+            long dsz = storage_size(g_dsk_dir, cfg.diskA);
             if (dsz > 0) {
                 snprintf(g_dsk_name, sizeof g_dsk_name, "%s", cfg.diskA);
                 total_sectors = (uint32_t)dsz / 512u;
