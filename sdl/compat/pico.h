@@ -22,5 +22,8 @@
 #ifndef __scratch_y
 #define __scratch_y(g)
 #endif
+#ifndef __dmb
+#define __dmb() ((void)0) // geen cross-core-barrier nodig op de desktop
+#endif
 
 #endif // PICO_COMPAT_H

@@ -116,8 +116,11 @@ static void menu_line_source(uint16_t *dst, int line, int *w)
 }
 
 // Machine: render live uit de VDP-state ("race the beam" — de beam-pacing in
-// de hoofdlus houdt core 0 net vóór de scanout).
-static void machine_line_source(uint16_t *dst, int line, int *w)
+// de hoofdlus houdt core 0 net vóór de scanout). In SRAM: dit is de
+// per-lijn-ingang van de producer (core 1); vanuit flash concurreert hij met
+// core 0's gestagede-ROM-fetches om de XIP-cache -> producer haalt het
+// beam-tempo niet en de ring krijgt misses.
+static void __not_in_flash_func(machine_line_source)(uint16_t *dst, int line, int *w)
 {
     *w = machine_render_line_565(dst, line);
 }
@@ -427,6 +430,12 @@ int main(void)
     if (!init_ok) {
         while (true) tight_loop_contents();
     }
+
+    // Beam-model: laat core 0 de MSX2-sprite-overlay per lijn vooraf berekenen
+    // (v9938_scanline), zodat de latency-kritische producer op core 1 alleen
+    // nog kopieert. Haalt de zware MAME-accurate spriteroutine van het hete
+    // pad -> geen ring-misses/glitches meer op sprite-zware lijnen.
+    machine_set_sprite_defer(true);
 
     // Machine draait: core 1 rendert vanaf nu live uit de VDP-state
     // (192 lijnen MSX1, 212 MSX2).

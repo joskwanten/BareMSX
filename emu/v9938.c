@@ -3,6 +3,9 @@
 
 #include "v9938.h"
 #include "pico.h"
+#ifndef PICO_COMPAT_H
+#include "hardware/sync.h" // __dmb() (op SDL levert compat/pico.h een no-op)
+#endif
 
 #include <string.h>
 #include <stdio.h>
@@ -770,10 +773,65 @@ static inline bool cmd_block_active(const v9938_context_t *ctx)
     return ctx->cm != 0 && ctx->cm != 0xA && ctx->cm != 0xB && ctx->cm != 0xF;
 }
 
+// ---- sprite mode 2: overlay-ring (Pico: berekend op core 0) ----
+// De MAME-accurate m2-spriteroutine (col[]-botsingsbuffer, per-pixel-branches,
+// twee 256-memsets, status-side-effects) is te zwaar voor de latency-kritische
+// producer op core 1: één zware sprite-lijn blokkeert 'm lang genoeg dat de
+// scanout de eerstvolgende lijnen nog niet klaar vindt -> ring-misses ->
+// glitches. Op de Pico berekent core 0 de overlay + status per lijn in
+// v9938_scanline (core 0 heeft frame-niveau-slack en absorbeert de variantie),
+// core 1 leest de overlay alleen nog. Bijvangst: de status-side-effects (5S,
+// collision) draaien nu op core 0 — waar de game ze óók leest, dus geen
+// cross-core race meer. Op SDL (één thread, render vóór scanline) blijft alles
+// inline (spr_deferred = false).
+#define SPR_RING_N 64   // > core0-lead 24 + SPR_LEAD + marge
+#define SPR_LEAD    24   // overlay N lijnen vóór de emulatie berekenen. De
+                         // bovenste SPR_LEAD lijnen (titel-tekst-sprites!) laten
+                         // zich niet vooruit doen bij frame-start, dus die
+                         // primen we AAN HET EIND van de vblank (SAT dan zeker
+                         // definitief). SPR_LEAD moet de titelregio dekken.
+static uint8_t spr_ovr_ring[SPR_RING_N][256];
+static volatile int16_t spr_ovr_line[SPR_RING_N];
+static bool spr_deferred = false;
+
+static void render_sprites_m2(v9938_context_t *ctx, uint8_t *ovr, int ln, bool update_status);
+static inline bool mode_uses_m2(int m)
+{
+    return m == 0x08 || m == 0x0C || m == 0x10 || m == 0x14 || m == 0x1C;
+}
+
+void v9938_set_sprite_defer(bool on)
+{
+    spr_deferred = on;
+    for (int i = 0; i < SPR_RING_N; i++) spr_ovr_line[i] = -1;
+}
+
 void __not_in_flash_func(v9938_scanline)(v9938_context_t *ctx, int line)
 {
     int active_h = (ctx->regs[9] & 0x80) ? 212 : 192;
     ctx->beam_line = (int16_t)line;
+
+    // Pico: sprite-overlay + status op core 0 berekenen (producer op core 1
+    // hoeft dan alleen te kopiëren). De crux is dat de overlay KLAAR moet zijn
+    // vóór de producer de lijn rendert:
+    //  - zichtbaar gebied: bereken SPR_LEAD lijnen vóóruit (mid-frame marge);
+    //  - de BOVENSTE SPR_LEAD lijnen kunnen niet vooruit bij frame-start (core
+    //    0 heeft daar nog geen voorsprong) -> die primen we tijdens de vblank
+    //    van het VORIGE frame, als core 0 idle is en de SAT al gezet is. Zo
+    //    staan juist de top-lijnen (titel-tekst-sprites!) ruim klaar.
+    // In lijnvolgorde, dus status (5S/collision) accumuleert goed.
+    // dmb: overlaydata zichtbaar vóór het lijnlabel dat core 1 pollt.
+    if (spr_deferred && mode_uses_m2(v_mode(ctx))) {
+        int m = (line < active_h)       ? line + SPR_LEAD  // vooruit in het beeld
+              : (line >= 262 - SPR_LEAD) ? line - (262 - SPR_LEAD) // eind-vblank -> top 0..
+              : -1;
+        if (m >= 0 && m < active_h) {
+            int slot = m % SPR_RING_N;
+            render_sprites_m2(ctx, spr_ovr_ring[slot], m, true);
+            __dmb();
+            spr_ovr_line[slot] = (int16_t)m;
+        }
+    }
 
     // Command-engine-budget bijvullen en een lopend blokcommando een stuk
     // verder laten lopen (MAME's update_command).
@@ -1100,7 +1158,7 @@ static void __not_in_flash_func(render_t2)(v9938_context_t *ctx, uint8_t *px512,
 // col[]-flags: 0x80 zichtbaar, 0x40 collisie-pixel, 0x20 CC0-basis,
 // 0x10 geblokkeerd, bits 0-3 kleur. Levert palette-indices in ovr
 // (0xFF = geen sprite).
-static void __not_in_flash_func(render_sprites_m2)(v9938_context_t *ctx, uint8_t *ovr, int ln)
+static void __not_in_flash_func(render_sprites_m2)(v9938_context_t *ctx, uint8_t *ovr, int ln, bool update_status)
 {
     memset(ovr, 0xFF, 256);
     if (ctx->regs[8] & 0x02) return; // SPD
@@ -1124,7 +1182,7 @@ static void __not_in_flash_func(render_sprites_m2)(v9938_context_t *ctx, uint8_t
         if (ln < y || ln >= y + height) continue;
         if (p2 == 8) {
             // 9e sprite op deze lijn: 5S + nummer (alleen als nog niet gezet).
-            if (!(ctx->status[0] & S0_5S))
+            if (update_status && !(ctx->status[0] & S0_5S))
                 ctx->status[0] = (uint8_t)((ctx->status[0] & 0xA0) | S0_5S | p);
             break;
         }
@@ -1163,7 +1221,7 @@ static void __not_in_flash_func(render_sprites_m2)(v9938_context_t *ctx, uint8_t
                 }
                 if (!(c & 0x60) && (pattern & 0x8000)) {
                     if (col[x] & 0x40) {
-                        if (p2 < 8) ctx->status[0] |= S0_C;
+                        if (update_status && p2 < 8) ctx->status[0] |= S0_C;
                     } else {
                         col[x] |= 0x40;
                     }
@@ -1173,11 +1231,34 @@ static void __not_in_flash_func(render_sprites_m2)(v9938_context_t *ctx, uint8_t
         }
         p2++;
     }
-    if (!(ctx->status[0] & S0_5S))
+    if (update_status && !(ctx->status[0] & S0_5S))
         ctx->status[0] = (uint8_t)((ctx->status[0] & 0xA0) | ((p < 32) ? p : 31));
 
     for (int xp = 0; xp < 256; xp++)
         if (col[xp] & 0x80) ovr[xp] = (uint8_t)(col[xp] & 0x0F);
+}
+
+// Sprite-overlay voor de renderer (core 1/SDL). Pico: lees de door core 0
+// vooraf-berekende overlay uit de ring (goedkope kopie); is 'ie zeldzaam nog
+// niet klaar, val terug op inline renderen ZONDER status (core 0 zet die tóch
+// voor deze lijn). SDL/geen-defer: gewoon inline mét status, zoals voorheen.
+static void __not_in_flash_func(sprites_m2_overlay)(v9938_context_t *ctx, uint8_t *ovr, int ln)
+{
+    if (spr_deferred) {
+        int slot = ln % SPR_RING_N;
+        if (spr_ovr_line[slot] == ln) {
+            __dmb();
+            memcpy(ovr, spr_ovr_ring[slot], 256);
+        } else {
+            // Core 0 was deze lijn (zeldzaam) net niet vóór -> GEEN dure inline-
+            // render op de latency-kritische producer (die piek gaf juist een
+            // video-miss). Deze lijn even zonder sprites; valt op lege top-
+            // lijnen, dus in de praktijk onzichtbaar.
+            memset(ovr, 0xFF, 256);
+        }
+    } else {
+        render_sprites_m2(ctx, ovr, ln, true);
+    }
 }
 
 // Gemeenschappelijke kern: render de lijn als palet-indices (of ruwe
@@ -1208,7 +1289,7 @@ static int __not_in_flash_func(render_line_idx)(v9938_context_t *ctx, uint8_t *b
     case 0x14:
         if (mode == 0x10) render_g5(ctx, buf, ln);
         else              render_g6(ctx, buf, ln);
-        render_sprites_m2(ctx, ovr, ln);
+        sprites_m2_overlay(ctx, ovr, ln);
         if (mode == 0x10) {
             // G5: de 4-bit spritekleur is TWEE 2-bit halfpixels (512-res).
             for (int k = 0; k < 256; k++)
@@ -1239,7 +1320,7 @@ static int __not_in_flash_func(render_line_idx)(v9938_context_t *ctx, uint8_t *b
         return 256;
     }
 
-    render_sprites_m2(ctx, ovr, ln);
+    sprites_m2_overlay(ctx, ovr, ln);
     if (*g7) {
         // G7-sprites gebruiken het VASTE hardware-spritepalet (paletregisters
         // doen er niet toe) — MAME's g7_ind16 (GRB333) omgezet naar GGGRRRBB.

@@ -78,6 +78,11 @@ typedef struct {
 } v9938_context_t;
 
 void v9938_init(v9938_context_t *ctx, uint8_t *vram128k);
+
+// Sprite mode 2-overlay uitbesteden aan core 0 (Pico beam-model): de
+// lijnrenderer op core 1 leest dan alleen een vooraf-berekende overlay i.p.v.
+// de dure spriteroutine zelf te draaien. Uit (default) = inline, voor SDL.
+void v9938_set_sprite_defer(bool on);
 void v9938_register_interrupt_func(v9938_context_t *ctx, v9938_irq_func_t f);
 
 // I/O-poorten (MSX: 0x98=data, 0x99=ctrl/status, 0x9A=palette, 0x9B=indirect).

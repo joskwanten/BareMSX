@@ -43,6 +43,10 @@ bool machine_init_msx2(const uint8_t *bios, uint32_t bios_size,
                        const uint8_t *game, uint32_t game_size,
                        uint8_t *vram128k, uint8_t *sccplus_ram64k);
 bool machine_is_msx2(void);
+
+// Pico beam-model: laat core 0 de MSX2-sprite-overlay vooraf berekenen (zie
+// v9938_set_sprite_defer). Aanroepen ná machine_init_msx2. No-op zonder MSX2.
+void machine_set_sprite_defer(bool on);
 int machine_display_width(void);  // 256 (MSX1) of 512 (MSX2)
 int machine_display_height(void); // 192 (MSX1) of 212 (MSX2)
 void machine_do_cycles();
