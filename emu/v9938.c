@@ -44,10 +44,14 @@ static inline bool v9938_mode(const v9938_context_t *ctx)
 
 static inline void addr_inc(v9938_context_t *ctx)
 {
-    if (v9938_mode(ctx))
+    if (v9938_mode(ctx)) {
         ctx->vram_addr = (ctx->vram_addr + 1) & 0x1FFFF;
-    else
+        // R14 is de echte A16-A14-teller: de carry over de 16KB-grens hoort
+        // erin terug, anders leest een volgende adres-setup een stale R14.
+        ctx->regs[14] = (uint8_t)((ctx->vram_addr >> 14) & 7);
+    } else {
         ctx->vram_addr = (ctx->vram_addr & 0x1C000) | ((ctx->vram_addr + 1) & 0x3FFF);
+    }
 }
 
 // ---- palette ----
@@ -87,7 +91,12 @@ void v9938_init(v9938_context_t *ctx, uint8_t *vram128k)
         uint32_t b5 = (b2 << 3) | (b2 << 1) | (b2 >> 1);
         g7_565[b] = (uint16_t)((r5 << 11) | (g6 << 5) | b5);
     }
-    ctx->status[2] = S2_TR; // transfer altijd "ready" zolang de engine synchroon is
+    // TR "ready"; S2-bits 2/3 staan op echte hardware vast op 1 en S4/S6
+    // hebben vaste 1-bits (detectieroutines onderscheiden zo een V99x8
+    // van een TMS9929).
+    ctx->status[2] = S2_TR | 0x0C;
+    ctx->status[4] = 0xFE;
+    ctx->status[6] = 0xFC;
 }
 
 void v9938_register_interrupt_func(v9938_context_t *ctx, v9938_irq_func_t f)
@@ -97,11 +106,14 @@ void v9938_register_interrupt_func(v9938_context_t *ctx, v9938_irq_func_t f)
 
 // ---- poortprotocol ----
 
+// MXC (R45 bit 6) stuurt de datapoort naar expansion-RAM; dat hebben we
+// niet, dus reads leveren 0xFF en writes verdwijnen (zoals op een kale
+// V9938 zonder expansiegeheugen).
 uint8_t __not_in_flash_func(v9938_read_data)(v9938_context_t *ctx) // 0x98 in
 {
     ctx->has_latched = false;
     uint8_t v = ctx->read_ahead; // read-ahead-buffer (§4.1)
-    ctx->read_ahead = ctx->vram[ctx->vram_addr];
+    ctx->read_ahead = (ctx->regs[45] & 0x40) ? 0xFF : ctx->vram[ctx->vram_addr];
     addr_inc(ctx);
     return v;
 }
@@ -109,17 +121,27 @@ uint8_t __not_in_flash_func(v9938_read_data)(v9938_context_t *ctx) // 0x98 in
 void __not_in_flash_func(v9938_write_data)(v9938_context_t *ctx, uint8_t v) // 0x98 out
 {
     ctx->has_latched = false;
-    ctx->vram[ctx->vram_addr] = v;
+    if (!(ctx->regs[45] & 0x40))
+        ctx->vram[ctx->vram_addr] = v;
     addr_inc(ctx);
 }
 
 static void cmd_start(v9938_context_t *ctx, uint8_t v);
 static void cmd_cpu_step(v9938_context_t *ctx, uint8_t data);
 
-// Registerschrijfactie met bijwerkingen.
+// Registerschrijfactie met bijwerkingen. R0-R27 hebben hardware-maskers
+// (ongebruikte bits lezen 0 terug); waarden uit MAME's reg_mask-tabel.
+static const uint8_t reg_mask[28] = {
+    0x7E, 0x7B, 0x7F, 0xFF, 0x3F, 0xFF, 0x3F, 0xFF,
+    0xFB, 0xBF, 0x07, 0x03, 0xFF, 0xFF, 0x07, 0x0F,
+    0x0F, 0xBF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0x00, 0x7F, 0x3F, 0x07,
+};
+
 static void __not_in_flash_func(reg_write)(v9938_context_t *ctx, int n, uint8_t v)
 {
     n &= 0x3F;
+    if (n <= 27) v &= reg_mask[n];
     ctx->regs[n] = v;
 #ifdef VDP_CMD_DEBUG
     if (n == 23 || n == 19 || n == 2 || n == 9)
@@ -157,8 +179,11 @@ void __not_in_flash_func(v9938_write_ctrl)(v9938_context_t *ctx, uint8_t v) // 0
         return;
     }
     ctx->has_latched = false;
-    if (v & 0x80) {
+    if ((v & 0xC0) == 0x80) {
         reg_write(ctx, v & 0x3F, ctx->latched); // V9938: 6-bit registernummer
+    } else if (v & 0x80) {
+        // Bits 7 én 6 gezet: geen registerwrite, geen adres-setup (hardware
+        // negeert het paar — MAME-gedrag).
     } else {
         // VRAM-adres-setup: A13-A8 in de tweede byte, A7-A0 in de eerste,
         // A16-A14 uit R14. Bit 6 = schrijf-setup; lees-setup prefetcht.
@@ -179,8 +204,9 @@ uint8_t __not_in_flash_func(v9938_read_status)(v9938_context_t *ctx) // 0x99 in
     uint8_t v = ctx->status[s];
     switch (s) {
     case 0:
-        // S0-read wist F, 5S en C (TMS-semantiek, §5.1).
-        ctx->status[0] = 0;
+        // S0-read wist F, 5S en C; het 5e/9e-spritenummer (bits 0-4)
+        // blijft staan (MAME/hardware).
+        ctx->status[0] &= 0x1F;
         break;
     case 1:
         // S1-read ackt de lijn-interrupt.
@@ -277,6 +303,7 @@ static inline uint32_t cmd_addr(const cmd_layout_t *L, uint32_t x, uint32_t y)
 
 static uint8_t __not_in_flash_func(vdp_point)(v9938_context_t *ctx, uint32_t x, uint32_t y)
 {
+    if (ctx->cmxs) return 0xFF; // bron in (afwezig) expansie-RAM
     cmd_layout_t L = cmd_layout(ctx);
     uint8_t b = ctx->vram[cmd_addr(&L, x, y)];
     switch (L.ppb) {
@@ -291,6 +318,7 @@ static uint8_t __not_in_flash_func(vdp_point)(v9938_context_t *ctx, uint32_t x, 
 // (5/6/7 en hun T-varianten) schrijven niet (MAME-gedrag).
 static void __not_in_flash_func(vdp_pset)(v9938_context_t *ctx, uint32_t x, uint32_t y, uint8_t color, uint8_t lo)
 {
+    if (ctx->cmxd) return; // doel in (afwezig) expansie-RAM
     if ((lo & 0x08) && color == 0) return;
     cmd_layout_t L = cmd_layout(ctx);
     uint32_t addr = cmd_addr(&L, x, y);
@@ -328,6 +356,11 @@ static void __not_in_flash_func(cmd_latch)(v9938_context_t *ctx)
     ctx->cny = (int16_t)(ctx->regs[42] | ((ctx->regs[43] & 3) << 8));
     ctx->cdix = (ctx->regs[45] & 0x04) ? -1 : 1;
     ctx->cdiy = (ctx->regs[45] & 0x08) ? -1 : 1;
+    // MXS/MXD: bron/doel in expansie-RAM — niet aanwezig, dus bron leest
+    // 0xFF en doel-writes verdwijnen (guards in vdp_point/vdp_pset en de
+    // byte-lussen).
+    ctx->cmxs = (ctx->regs[45] & 0x10) ? 1 : 0;
+    ctx->cmxd = (ctx->regs[45] & 0x20) ? 1 : 0;
 }
 
 // Register-terugschrijf bij voltooiing (echte hardware doet dit; software
@@ -380,7 +413,8 @@ static void __not_in_flash_func(cmd_run_vram)(v9938_context_t *ctx, uint8_t cm)
     case 0xC: { // HMMV: byte-vulling
         int adx = ctx->cdx, anx = nxb;
         for (;;) {
-            ctx->vram[cmd_addr(&L, (uint32_t)adx, (uint32_t)dy)] = clr;
+            if (!ctx->cmxd)
+                ctx->vram[cmd_addr(&L, (uint32_t)adx, (uint32_t)dy)] = clr;
             if (!--anx || ((adx += btx) & width)) {
                 if (!(--ny & 1023) || (dy += ty) == -1) break;
                 adx = ctx->cdx; anx = nxb;
@@ -393,8 +427,9 @@ static void __not_in_flash_func(cmd_run_vram)(v9938_context_t *ctx, uint8_t cm)
     case 0xD: { // HMMM: byte-kopie
         int asx = ctx->csx, adx = ctx->cdx, anx = nxb;
         for (;;) {
-            ctx->vram[cmd_addr(&L, (uint32_t)adx, (uint32_t)dy)] =
-                ctx->vram[cmd_addr(&L, (uint32_t)asx, (uint32_t)sy)];
+            if (!ctx->cmxd)
+                ctx->vram[cmd_addr(&L, (uint32_t)adx, (uint32_t)dy)] = ctx->cmxs
+                    ? 0xFF : ctx->vram[cmd_addr(&L, (uint32_t)asx, (uint32_t)sy)];
             if (!--anx || ((asx += btx) & width) || ((adx += btx) & width)) {
                 if (!(--ny & 1023) || (sy += ty) == -1 || (dy += ty) == -1) break;
                 asx = ctx->csx; adx = ctx->cdx; anx = nxb;
@@ -406,11 +441,12 @@ static void __not_in_flash_func(cmd_run_vram)(v9938_context_t *ctx, uint8_t cm)
         wb_dy_ny(ctx, dy, ny);
         break;
     }
-    case 0xE: { // YMMM: byte-kopie in Y, X loopt van DX naar de rand
+    case 0xE: { // YMMM: byte-kopie in Y (bron én doel via MXD, zoals MAME)
         int adx = ctx->cdx;
         for (;;) {
-            ctx->vram[cmd_addr(&L, (uint32_t)adx, (uint32_t)dy)] =
-                ctx->vram[cmd_addr(&L, (uint32_t)adx, (uint32_t)sy)];
+            if (!ctx->cmxd)
+                ctx->vram[cmd_addr(&L, (uint32_t)adx, (uint32_t)dy)] =
+                    ctx->vram[cmd_addr(&L, (uint32_t)adx, (uint32_t)sy)];
             if ((adx += btx) & width) {
                 if (!(--ny & 1023) || (sy += ty) == -1 || (dy += ty) == -1) break;
                 adx = ctx->cdx;
@@ -570,7 +606,8 @@ static void __not_in_flash_func(cmd_cpu_step)(v9938_context_t *ctx, uint8_t data
     int tx = ctx->cdix, btx = ctx->cdix * (int)L.ppb, ty = ctx->cdiy;
     switch (ctx->cm) {
     case 0xF: // HMMC: byte schrijven, dan tellers doorschuiven
-        ctx->vram[cmd_addr(&L, (uint32_t)ctx->cadx, (uint32_t)ctx->cdy)] = data;
+        if (!ctx->cmxd)
+            ctx->vram[cmd_addr(&L, (uint32_t)ctx->cadx, (uint32_t)ctx->cdy)] = data;
         if (!--ctx->canx || ((ctx->cadx += btx) & width)) {
             if (!(--ctx->cny & 1023) || (ctx->cdy += ty) == -1) {
                 if (!ctx->cny) ctx->cdy += ty;
@@ -648,6 +685,7 @@ void __not_in_flash_func(v9938_scanline)(v9938_context_t *ctx, int line)
 
     if (line == active_h) {
         ctx->status[0] |= S0_F;
+        ctx->status[2] ^= 0x02; // EO: even/oneven-veldbit toggelt per frame
         if (IE0(ctx) && ctx->irq_func)
             ctx->irq_func();
     }

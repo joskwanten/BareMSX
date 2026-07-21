@@ -177,6 +177,55 @@ static void test_fh_clear_ie1_off(void)
     CHECK(ctx.status[1] & 0x01, "FH gewist ondanks IE1 aan");
 }
 
+// T7: adres-carry over de 16KB-grens komt in R14 terecht.
+static void test_r14_carry(void)
+{
+    setup_g4();
+    wreg(14, 0);
+    v9938_write_ctrl(&ctx, 0xFE); // A7-A0
+    v9938_write_ctrl(&ctx, 0x7F); // schrijf-setup A13-A8 = 0x3F -> adres 0x3FFE
+    v9938_write_data(&ctx, 1);    // 0x3FFE
+    v9938_write_data(&ctx, 2);    // 0x3FFF
+    v9938_write_data(&ctx, 3);    // 0x4000 (carry!)
+    CHECK(vram[0x4000] == 3, "write na 16K-grens landde op %02X/%02X", vram[0x4000], vram[0x0000]);
+    CHECK(ctx.regs[14] == 1, "R14 kreeg de carry niet: %d", ctx.regs[14]);
+}
+
+// T9: MXC (R45 bit 6) stuurt de datapoort naar afwezig expansie-RAM.
+static void test_mxc_data_port(void)
+{
+    setup_g4();
+    wreg(45, 0x40);
+    v9938_write_ctrl(&ctx, 0x00);
+    v9938_write_ctrl(&ctx, 0x40); // schrijf-setup adres 0
+    v9938_write_data(&ctx, 0xAB);
+    CHECK(vram[0] == 0x00, "MXC-write kwam in VRAM terecht");
+    wreg(45, 0x00);
+    vram[0x10] = 0x5A;
+    v9938_write_ctrl(&ctx, 0x10);
+    v9938_write_ctrl(&ctx, 0x00); // lees-setup adres 0x10 (prefetch)
+    CHECK(v9938_read_data(&ctx) == 0x5A, "normale read na MXC faalt");
+}
+
+// T6: S2-bits 2/3 staan vast op 1; S4/S6 hebben vaste 1-bits (T4).
+static void test_fixed_status_bits(void)
+{
+    setup_g4();
+    CHECK((rstat(2) & 0x0C) == 0x0C, "S2 vaste bits 2/3 niet hoog: %02X", rstat(2));
+    CHECK(rstat(4) == 0xFE, "S4 niet 0xFE: %02X", rstat(4));
+    CHECK(rstat(6) == 0xFC, "S6 niet 0xFC: %02X", rstat(6));
+}
+
+// T8: tweede 0x99-byte met bits 7+6 gezet wordt genegeerd.
+static void test_ctrl_write_gate(void)
+{
+    setup_g4();
+    uint8_t before = ctx.regs[7];
+    v9938_write_ctrl(&ctx, 0x99);
+    v9938_write_ctrl(&ctx, 0xC7); // zou "R7 = 0x99" zijn zonder gate
+    CHECK(ctx.regs[7] == before, "0xC0-write muteerde R7: %02X", ctx.regs[7]);
+}
+
 int main(void)
 {
     test_hmmv_edge_clip();
@@ -189,6 +238,10 @@ int main(void)
     test_cmd_outside_bitmap();
     test_line_irq_r23();
     test_fh_clear_ie1_off();
+    test_r14_carry();
+    test_mxc_data_port();
+    test_fixed_status_bits();
+    test_ctrl_write_gate();
     if (fails) { printf("%d FAILED\n", fails); return 1; }
     printf("alle tests OK\n");
     return 0;

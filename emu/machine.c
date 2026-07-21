@@ -372,7 +372,10 @@ void __not_in_flash_func(machine_do_cycles)(void)
 {
 #ifdef BAREMSX_MSX2
     if (g_msx2) {
-        for (int line = 0; line < 262; line++) machine_do_line(line);
+        // R9 bit 1 = PAL: 313 lijnen/50Hz i.p.v. 262/60 — anders draait
+        // Europese software ~20% te snel.
+        int nlines = (v9938.regs[9] & 0x02) ? 313 : 262;
+        for (int line = 0; line < nlines; line++) machine_do_line(line);
         return;
     }
 #endif

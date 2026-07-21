@@ -70,6 +70,7 @@ typedef struct {
     uint16_t cnx;                          // gelatchte NX (10 bits)
     int16_t cny;                           // werk-NY (telt af, MAME-stijl)
     int8_t cdix, cdiy;                     // richting (+1/-1) uit ARG
+    uint8_t cmxs, cmxd;                    // ARG bits 4/5: src/dst in expansie-RAM
     int16_t casx, cadx, canx;              // werk-X-tellers (CPU-transfers)
 } v9938_context_t;
 
