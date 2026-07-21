@@ -166,9 +166,18 @@ static void __not_in_flash_func(write_port_impl)(uint8_t port, uint8_t value)
     if (g_msx2) {
         switch (port) {
         case 0x98: v9938_write_data(&v9938, value); return;
-        case 0x99: v9938_write_ctrl(&v9938, value); return;
+        case 0x99:
+            v9938_write_ctrl(&v9938, value);
+            // R0/R1-writes (IE1/IE0) kunnen de INT-lijn beide kanten op
+            // veranderen: IE aan met hangende flag -> meteen asserteren,
+            // IE uit -> intrekken (anders hertriggert de ISR eindeloos).
+            z80_int(&cpu, v9938_irq_asserted(&v9938) ? Z_TRUE : Z_FALSE);
+            return;
         case 0x9a: v9938_write_palette(&v9938, value); return;
-        case 0x9b: v9938_write_indirect(&v9938, value); return;
+        case 0x9b:
+            v9938_write_indirect(&v9938, value); // kan ook R0/R1 raken
+            z80_int(&cpu, v9938_irq_asserted(&v9938) ? Z_TRUE : Z_FALSE);
+            return;
         case 0xb4: rtc_select(&rtc, value); return;
         case 0xb5: rtc_write(&rtc, value); return;
         case 0xfc: case 0xfd: case 0xfe: case 0xff:

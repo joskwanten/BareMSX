@@ -57,15 +57,20 @@ typedef struct {
     v9938_irq_func_t irq_func;
 
     // Command-engine (R32-R46). VRAM-commando's voeren synchroon uit bij de
-    // R46-write; CPU-transfers (HMMC/LMMC/LMCM) blijven actief en verwerken
-    // per R44-write / S7-read één eenheid. Parameters worden bij de start
-    // gelatcht; cwx/cwy zijn de werk-tellers.
+    // R46-write (lusstructuur en rand-/registersemantiek naar MAME's v99x8,
+    // BSD-3); CPU-transfers (HMMC/LMMC/LMCM) blijven actief en verwerken per
+    // R44-write / S7-read één eenheid. csx/cdx/cnx blijven de gelatchte
+    // waarden (rij-reset); csy/cdy/cny muteren tijdens CPU-transfers en
+    // worden bij voltooiing naar R34-R43 teruggeschreven (zoals hardware).
     uint32_t s2_phase;                     // pseudo-beamfase voor S2 VR/HR
     uint8_t ce_hold;                       // CE nog N S2-reads hoog houden
     uint8_t cm, clo;                       // commando (hoge nibble) + log. op
-    uint16_t csx, csy, cdx, cdy, cnx, cny; // gelatchte SX/SY/DX/DY/NX/NY
+    int16_t csx, cdx;                      // gelatchte SX/DX (9 bits)
+    int16_t csy, cdy;                      // werk-SY/DY (10 bits; -1 = abort)
+    uint16_t cnx;                          // gelatchte NX (10 bits)
+    int16_t cny;                           // werk-NY (telt af, MAME-stijl)
     int8_t cdix, cdiy;                     // richting (+1/-1) uit ARG
-    uint16_t cwx, cwy;                     // voortgang binnen het commando
+    int16_t casx, cadx, canx;              // werk-X-tellers (CPU-transfers)
 } v9938_context_t;
 
 void v9938_init(v9938_context_t *ctx, uint8_t *vram128k);
