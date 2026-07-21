@@ -20,6 +20,15 @@ naast de framebuffers in 520KB SRAM).
   NOOIT code overnemen of vertalen: openMSX is GPL-2.0 en fMSX
   non-commercieel; afgeleide code zou de MIT-licentie van BareMSX breken.
   Lezen → begrijpen → zelf formuleren.
+- **Kopieerbare codereferentie: MAME `v99x8`**
+  (`src/devices/video/v9938.{cpp,h}`, license:BSD-3-Clause, copyright
+  Aaron Giles & Nathan Woods) — de enige permissief-gelicentieerde
+  complete V9938/V9958. Vertalen/overnemen MAG (BSD-3 is MIT-compatibel);
+  bij substantiële overname het BSD-3-notice in het betreffende bestand
+  of in de README-credits zetten. Lokaal: `docs/refs/mame/` (niet in git).
+  Kanttekening: functioneel accuraat maar niet cycle-exact — voor
+  timingkwesties (command-busy vs beam) blijft datasheet + openMSX-
+  kruispeiling leidend. Vergelijkingsscan: `docs/V9938-MAME-DIFF.md`.
 
 ## Wat waar leeft in msx_rs
 
@@ -59,6 +68,13 @@ naast de framebuffers in 520KB SRAM).
 4. **Machine**: mapper-RAM, sub-ROM, RTC, lijn-granulaire emulatielus
    (228 T-states/lijn i.p.v. frame-in-één-keer — nodig voor lijn-IRQs),
    machineprofiel-keuze (MSX1/MSX2 o.b.v. system/-inhoud), menu.
+5. **(later) V9958/MSX2+**: bijna een superset van de V9938 — YJK-modes
+   (SCREEN 10-12), horizontale scroll (R#25-R#27), aangepast wait-gedrag;
+   geen extra VRAM. Voorbereiding die we nú al doen: mode-decode op één
+   plek houden en de horizontale startoffset niet hardcoden in de
+   renderers. MAME's v99x8 dekt beide chips (YJK-decode incl. lookup);
+   op de Pico kan zo'n tabel in flash. Vereist een MSX2+-machineprofiel
+   en -BIOS voordat het zin heeft.
 
 ## Architectuurbeslissingen
 
