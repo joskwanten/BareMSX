@@ -293,7 +293,18 @@ int main(int argc, char **argv)
                 case SDL_SCANCODE_KP_ENTER:
                 case SDL_SCANCODE_SPACE:  menu_input(MENU_ENTER); break;
                 case SDL_SCANCODE_ESCAPE: menu_input(MENU_BACK); break;
-                default: break;
+                case SDL_SCANCODE_BACKSPACE: menu_input(MENU_DEL); break;
+                default:
+                    // Letters/cijfers -> zoekveld van de browse-lijst.
+                    if (e.key.keysym.scancode >= SDL_SCANCODE_A &&
+                        e.key.keysym.scancode <= SDL_SCANCODE_Z)
+                        menu_char((char)('a' + e.key.keysym.scancode - SDL_SCANCODE_A));
+                    else if (e.key.keysym.scancode >= SDL_SCANCODE_1 &&
+                             e.key.keysym.scancode <= SDL_SCANCODE_9)
+                        menu_char((char)('1' + e.key.keysym.scancode - SDL_SCANCODE_1));
+                    else if (e.key.keysym.scancode == SDL_SCANCODE_0)
+                        menu_char('0');
+                    break;
                 }
             }
         }

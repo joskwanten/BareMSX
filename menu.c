@@ -36,6 +36,29 @@ static storage_entry_t g_list[128]; // 128 entries/map: ruim, en ~17KB
                                     // zip-extractiebuffers ~15KB kunnen dragen)
 static int g_list_n, g_bsel, g_btop;
 
+// Zoekveld (browse): prefix-filter, hoofdletterongevoelig. g_fidx bevat de
+// indices in g_list die matchen; g_bsel/g_btop lopen over de gefilterde lijst.
+static char g_search[17];
+static int g_search_len;
+static int g_fidx[(int)(sizeof g_list / sizeof g_list[0])];
+static int g_fn;
+
+static inline char lower(char c)
+{
+    return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
+}
+
+static void refilter(void)
+{
+    g_fn = 0;
+    for (int i = 0; i < g_list_n; i++) {
+        int j = 0;
+        while (j < g_search_len && lower(g_list[i].name[j]) == g_search[j]) j++;
+        if (j == g_search_len) g_fidx[g_fn++] = i;
+    }
+    g_bsel = g_btop = 0;
+}
+
 // --- rendering (RGB565 output; colours defined as ARGB, converted here) ---
 static inline uint16_t to565(uint32_t argb)
 {
@@ -115,21 +138,31 @@ static void render_browse(uint16_t *fb)
     snprintf(title, sizeof title, "-- %s --", g_dir);
     draw_text(fb, 3, 1, title, COL_TITLE, COL_BG);
 
+    // Zoekveld: getypte letters filteren de lijst op naam-prefix.
+    if (g_search_len > 0) {
+        char s[40];
+        snprintf(s, sizeof s, "find: %s_", g_search);
+        draw_text(fb, 2, 2, s, COL_TEXT, COL_BG);
+    }
+
     if (g_bsel < g_btop) g_btop = g_bsel;
     if (g_bsel >= g_btop + BROWSE_ROWS) g_btop = g_bsel - BROWSE_ROWS + 1;
 
     if (g_list_n == 0)
         draw_text(fb, 3, 3, "(no files)", COL_DIM, COL_BG);
+    else if (g_fn == 0)
+        draw_text(fb, 3, 3, "(no matches)", COL_DIM, COL_BG);
 
-    for (int i = 0; i < BROWSE_ROWS && (g_btop + i) < g_list_n; i++) {
+    for (int i = 0; i < BROWSE_ROWS && (g_btop + i) < g_fn; i++) {
         int idx = g_btop + i;
         int row = 3 + i;
         bool sel = (idx == g_bsel);
         if (sel) fill_row(fb, row, COL_SEL_BG);
-        draw_text(fb, 2, row, g_list[idx].name, sel ? COL_SEL_TEXT : COL_TEXT, sel ? COL_SEL_BG : COL_BG);
+        draw_text(fb, 2, row, g_list[g_fidx[idx]].name,
+                  sel ? COL_SEL_TEXT : COL_TEXT, sel ? COL_SEL_BG : COL_BG);
     }
 
-    draw_text(fb, 2, 22, "pgup/dn enter=select esc=cancel", COL_DIM, COL_BG);
+    draw_text(fb, 2, 22, "type=find pgup/dn enter esc", COL_DIM, COL_BG);
 }
 
 void menu_render(uint16_t *fb)
@@ -157,8 +190,9 @@ static void open_browse(int field)
              : g_cfg->diskA;
     int n = storage_list(g_dir, g_list, (int)(sizeof g_list / sizeof g_list[0]));
     g_list_n = (n < 0) ? 0 : n;
-    g_bsel = 0;
-    g_btop = 0;
+    g_search_len = 0;
+    g_search[0] = 0;
+    refilter(); // ook: g_bsel/g_btop naar 0
     g_mode = MODE_BROWSE;
 }
 
@@ -172,7 +206,8 @@ void menu_input(menu_input_t in)
             if (g_sel == 3) g_start = true;
             else open_browse(g_sel);
             break;
-        case MENU_BACK: // clear the selected field
+        case MENU_BACK: // Esc/Backspace: clear the selected field
+        case MENU_DEL:
             if (g_sel < 3) {
                 char *t = (g_sel == 0) ? g_cfg->slot1 : (g_sel == 1) ? g_cfg->slot2
                         : g_cfg->diskA;
@@ -185,25 +220,42 @@ void menu_input(menu_input_t in)
     } else { // MODE_BROWSE
         switch (in) {
         case MENU_UP:   if (g_bsel > 0) g_bsel--; break;
-        case MENU_DOWN: if (g_bsel + 1 < g_list_n) g_bsel++; break;
+        case MENU_DOWN: if (g_bsel + 1 < g_fn) g_bsel++; break;
         case MENU_PGUP:
             g_bsel = (g_bsel > BROWSE_ROWS) ? g_bsel - BROWSE_ROWS : 0;
             break;
         case MENU_PGDN:
-            if (g_list_n > 0) {
+            if (g_fn > 0) {
                 g_bsel += BROWSE_ROWS;
-                if (g_bsel >= g_list_n) g_bsel = g_list_n - 1;
+                if (g_bsel >= g_fn) g_bsel = g_fn - 1;
             }
             break;
         case MENU_ENTER:
-            if (g_list_n > 0) {
-                snprintf(g_target, STORAGE_MAX_NAME, "%s", g_list[g_bsel].name);
+            if (g_fn > 0) {
+                snprintf(g_target, STORAGE_MAX_NAME, "%s", g_list[g_fidx[g_bsel]].name);
                 g_mode = MODE_MAIN;
+            }
+            break;
+        case MENU_DEL: // Backspace: een zoekletter wissen
+            if (g_search_len > 0) {
+                g_search[--g_search_len] = 0;
+                refilter();
             }
             break;
         case MENU_BACK: g_mode = MODE_MAIN; break;
         }
     }
+}
+
+void menu_char(char c)
+{
+    if (g_mode != MODE_BROWSE) return;
+    c = lower(c);
+    if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))) return;
+    if (g_search_len >= (int)(sizeof g_search) - 1) return;
+    g_search[g_search_len++] = c;
+    g_search[g_search_len] = 0;
+    refilter();
 }
 
 bool menu_start_requested(void)

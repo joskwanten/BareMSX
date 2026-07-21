@@ -135,8 +135,10 @@ a real MSX1 (C-BIOS cannot boot disks) — dump one from a machine you own.
 |-----|--------|
 | ↑ / ↓ | navigate |
 | PgUp / PgDn | jump a page through the file list |
+| A-Z / 0-9 | type-to-find: filter the file list on name prefix |
+| Backspace | erase a search letter (or clear the field on the main screen) |
 | Enter / Space | select / open browser |
-| Esc / Backspace | back |
+| Esc | back |
 
 Pick a ROM for Slot 1, select **Start**. A solid blue screen at boot means no
 SD card (or no BIOS in `system/`) was found. **F11** returns from a game to

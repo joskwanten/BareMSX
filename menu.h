@@ -20,9 +20,10 @@ typedef enum {
     MENU_UP,
     MENU_DOWN,
     MENU_ENTER,
-    MENU_BACK,
+    MENU_BACK,  // Esc: annuleer browse / wis het geselecteerde veld
     MENU_PGUP,  // een lijstpagina omhoog (browse)
     MENU_PGDN,  // een lijstpagina omlaag (browse)
+    MENU_DEL,   // Backspace: wis een zoekletter (browse) / wis veld (main)
 } menu_input_t;
 
 // `bios` is the loaded BIOS image (used for its 8x8 character font via CGTABL).
@@ -30,6 +31,9 @@ typedef enum {
 void menu_init(const uint8_t *bios, menu_config_t *cfg);
 
 void menu_input(menu_input_t in);
+// Teken-invoer voor het zoekveld in de browse-lijst ('a'-'z', '0'-'9'):
+// filtert op bestandsnamen die met de getypte letters beginnen.
+void menu_char(char c);
 void menu_render(uint16_t *fb); // 256x192 RGB565
 bool menu_start_requested(void);
 

@@ -288,7 +288,11 @@ int main(void)
                     usbkbd_task();
                     int ev;
                     bool dirty = false;
-                    while ((ev = usbkbd_menu_poll()) >= 0) { menu_input((menu_input_t)ev); dirty = true; }
+                    while ((ev = usbkbd_menu_poll()) >= 0) {
+                        if (ev >= USBKBD_MENU_CHAR_BASE) menu_char((char)(ev & 0xFF));
+                        else menu_input((menu_input_t)ev);
+                        dirty = true;
+                    }
                     if (dirty) menu_render(menu_fb); // geen continue herteken-tearing
                 }
                 usbkbd_menu_mode(false);

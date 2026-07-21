@@ -41,8 +41,14 @@ static void menu_key(uint8_t hid)
     case 0x4B: ev = MENU_PGUP; break;               // Page Up
     case 0x4E: ev = MENU_PGDN; break;               // Page Down
     case 0x28: case 0x58: case 0x2C: ev = MENU_ENTER; break; // Enter, KP-Enter, Space
-    case 0x29: case 0x2A: ev = MENU_BACK; break;    // Esc, Backspace
-    default: break;
+    case 0x29: ev = MENU_BACK; break;               // Esc
+    case 0x2A: ev = MENU_DEL; break;                // Backspace (zoekletter wissen)
+    default:
+        // Letters/cijfers -> zoekveld (USBKBD_MENU_CHAR_BASE | teken).
+        if (hid >= 0x04 && hid <= 0x1D)      ev = USBKBD_MENU_CHAR_BASE | ('a' + hid - 0x04);
+        else if (hid >= 0x1E && hid <= 0x26) ev = USBKBD_MENU_CHAR_BASE | ('1' + hid - 0x1E);
+        else if (hid == 0x27)                ev = USBKBD_MENU_CHAR_BASE | '0';
+        break;
     }
     if (ev >= 0) menu_push(ev);
 }
