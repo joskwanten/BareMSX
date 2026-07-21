@@ -35,9 +35,29 @@ hence the git history — but is now HDMI-first.)
   the image, so games can save. Needs a real MSX1 BIOS — C-BIOS cannot
   boot disks.
 
-Status: work in progress. MSX1 only (MSX2/V9938 is on the roadmap).
-Current limitations: Disk B is UI-only, and a slot 2 cartridge and the
-disk drive can't be used at the same time (slot 2 is shared).
+Status: work in progress. The **MSX2 profile (V9938)** runs in the SDL
+desktop build: SCREEN 0-8, sprite mode 2 with collision/status semantics,
+and a command engine with a realistic busy-timing model (validated against
+MAME's v99x8 — see `docs/V9938-MAME-DIFF.md` for the full comparison and
+per-finding status). MSX2 on the Pico itself waits for PSRAM support
+(128KB VRAM + mapper RAM don't fit next to the framebuffers in SRAM).
+
+Still open on the V9938:
+
+- **R#18 set-adjust** — screen positioning/shake effects are ignored.
+- **G6/G7 VRAM interleave** — SCREEN 7/8 use a flat layout internally;
+  correct within a mode, wrong for software that mixes mode families.
+- **TEXT2 blink** (R#12/R#13) — 80-column cursor/highlight blinking
+  (MSX-DOS2, word processors) doesn't blink yet.
+- **Interlace / even-odd page flip** (R#9 IL/EO) — 512×424 images and
+  flicker-transparency tricks show a single fixed page.
+- **MC / SCREEN 3** — renders backdrop only.
+- On the future Pico/MSX2 path: sprite status bits are computed in the
+  line renderers, which is correct for the SDL beam loop but must move
+  to the emulation side once core 1 does the rendering.
+
+Other current limitations: Disk B is UI-only, and a slot 2 cartridge and
+the disk drive can't be used at the same time (slot 2 is shared).
 
 ## Hardware
 
