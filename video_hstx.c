@@ -22,9 +22,12 @@
 // scanlinecallback consumeert. ring_line[i] = welk MSX-lijnnummer er in slot
 // i klaarstaat (-1 = leeg); pas gezet NA het vullen (dmb) zodat de consumer
 // nooit een half gevulde lijn ziet.
-#define RING_N 8
+// Ring van 16 lijnen: core 0 rendert vooruit in de ring (render-op-core-0-
+// model), core 1 scant 'm uit. Ruim genoeg om z80-variantie (muziek/blit) te
+// absorberen zonder de scanout in te halen.
+#define RING_N 16
 static uint16_t ring[RING_N][512];
-static volatile int16_t ring_line[RING_N] = {-1, -1, -1, -1, -1, -1, -1, -1};
+static volatile int16_t ring_line[RING_N];
 static volatile uint16_t ring_w[RING_N];
 
 // Diagnose (uitleesbaar via SWD): callback-aanroepen, pipeline-misses,
@@ -122,6 +125,26 @@ static void __not_in_flash_func(pipeline_task)(void)
     audio_hdmi_pump();
 }
 
+// --- render-op-core-0-model ---
+// Core 0 rendert elke MSX-lijn RECHTSTREEKS in de ring, direct na het
+// emuleren van die lijn — dus met exact de VDP-registerstand die gold toen de
+// beam bij die lijn was. Geen live-render op core 1 meer, dus geen mismatch
+// voor mid-frame register-wisselingen (split-screen R23/R2, palette, ...).
+// claim_line geeft de slotbuffer om in te renderen; publish_line maakt 'm
+// zichtbaar voor de scanout (dmb vóór het lijnlabel).
+uint16_t *__not_in_flash_func(video_hstx_claim_line)(int msx_line)
+{
+    return ring[(unsigned)msx_line % RING_N];
+}
+
+void __not_in_flash_func(video_hstx_publish_line)(int msx_line, int w)
+{
+    int slot = (unsigned)msx_line % RING_N;
+    ring_w[slot] = (uint16_t)w;
+    __dmb();
+    ring_line[slot] = (int16_t)msx_line;
+}
+
 // Vsync: beam-teller resetten zodat core 0's pacing de nieuwe frame ziet.
 static void __not_in_flash_func(vsync_cb)(void)
 {
@@ -139,6 +162,7 @@ static void core1_entry(void)
 
 void video_hstx_init(void)
 {
+    for (int i = 0; i < RING_N; i++) ring_line[i] = -1;
     hstx_di_queue_init();
     audio_hdmi_init();
 

@@ -36,6 +36,14 @@ void video_hstx_set_border(uint16_t border565);
 // Core 0 paced hierop: emuleer lijn L pas als de scanout in de buurt komt.
 int video_hstx_scan_msx_line(void);
 
+// Render-op-core-0: core 0 rendert een MSX-lijn RECHTSTREEKS in de ring, direct
+// na het emuleren ervan (correcte registerstand, geen live-render-mismatch).
+// claim_line geeft de RGB565-buffer (>=512 breed) om in te renderen; na het
+// vullen publish_line(line, w) met w = 256 of 512. Gebruik dit i.p.v. een
+// video_line_source zodra de machine draait (de bron blijft NULL).
+uint16_t *video_hstx_claim_line(int msx_line);
+void video_hstx_publish_line(int msx_line, int w);
+
 // HDMI-frames tot nu toe (pico_hdmi's video_frame_count).
 uint32_t video_hstx_frame_count(void);
 

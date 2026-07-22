@@ -1163,14 +1163,31 @@ static void __not_in_flash_func(render_sprites_m2)(v9938_context_t *ctx, uint8_t
     memset(ovr, 0xFF, 256);
     if (ctx->regs[8] & 0x02) return; // SPD
 
-    uint8_t col[256];
-    memset(col, 0, 256);
     uint32_t SA = (((uint32_t)ctx->regs[11] & 3) << 15) | (((uint32_t)ctx->regs[5] & 0xFC) << 7);
     uint32_t SC = (((uint32_t)ctx->regs[11] & 3) << 15) | (((uint32_t)ctx->regs[5] & 0xF8) << 7);
     uint32_t SG = ((uint32_t)ctx->regs[6] & 0x3F) << 11;
     uint32_t colourmask = (((uint32_t)ctx->regs[5] & 3) << 3) | 7;
     int sixteen = SIXTEEN(ctx), mag = MAGNIFIED(ctx);
     int height = (sixteen ? 16 : 8) << (mag ? 1 : 0);
+    uint8_t vscroll = ctx->regs[23];
+
+    // Snelle voor-scan: staat er überhaupt een sprite op deze lijn? De meeste
+    // lijnen hebben er geen -> dan de dure col-wis + pixellus + kopie overslaan.
+    {
+        int any = 0;
+        for (int q = 0; q < 32; q++) {
+            int yq = ctx->vram[SA + 4u * (uint32_t)q];
+            if (yq == 216) break;
+            yq = (yq - vscroll) & 255;
+            yq = (yq > 216) ? -(~yq & 255) : yq + 1;
+            if (ln >= yq && ln < yq + height) { any = 1; break; }
+        }
+        if (!any) return;
+    }
+
+    uint8_t col[256];
+    memset(col, 0, 256);
+    int lo = 256, hi = -1; // getekende x-band, voor een begrensde eind-kopie
 
     int p, p2 = 0, first_cc_seen = 0;
     for (p = 0; p < 32; p++) {
@@ -1215,6 +1232,8 @@ static void __not_in_flash_func(render_sprites_m2)(v9938_context_t *ctx, uint8_t
                             col[x] |= (uint8_t)(c & 15); // CC=1: kleur-OR
                         }
                         col[x] |= 0x80;
+                        if (x < lo) lo = x;
+                        if (x > hi) hi = x;
                     }
                 } else if (!(c & 0x40) && (col[x] & 0x20)) {
                     col[x] |= 0x10; // basis gepasseerd: latere CC=0 blokkeren
@@ -1234,7 +1253,7 @@ static void __not_in_flash_func(render_sprites_m2)(v9938_context_t *ctx, uint8_t
     if (update_status && !(ctx->status[0] & S0_5S))
         ctx->status[0] = (uint8_t)((ctx->status[0] & 0xA0) | ((p < 32) ? p : 31));
 
-    for (int xp = 0; xp < 256; xp++)
+    for (int xp = lo; xp <= hi; xp++)
         if (col[xp] & 0x80) ovr[xp] = (uint8_t)(col[xp] & 0x0F);
 }
 

@@ -115,16 +115,6 @@ static void menu_line_source(uint16_t *dst, int line, int *w)
     *w = MSX_W;
 }
 
-// Machine: render live uit de VDP-state ("race the beam" — de beam-pacing in
-// de hoofdlus houdt core 0 net vóór de scanout). In SRAM: dit is de
-// per-lijn-ingang van de producer (core 1); vanuit flash concurreert hij met
-// core 0's gestagede-ROM-fetches om de XIP-cache -> producer haalt het
-// beam-tempo niet en de ring krijgt misses.
-static void __not_in_flash_func(machine_line_source)(uint16_t *dst, int line, int *w)
-{
-    *w = machine_render_line_565(dst, line);
-}
-
 // Pacing-telemetrie (SWD-uitleesbaar): waar wacht de hoofdlus en wat ziet hij?
 volatile int dbg_pace_ln = -99, dbg_pace_scan = -99;
 volatile uint32_t dbg_core0_frames = 0;
@@ -431,16 +421,13 @@ int main(void)
         while (true) tight_loop_contents();
     }
 
-    // Beam-model: laat core 0 de MSX2-sprite-overlay per lijn vooraf berekenen
-    // (v9938_scanline), zodat de latency-kritische producer op core 1 alleen
-    // nog kopieert. Haalt de zware MAME-accurate spriteroutine van het hete
-    // pad -> geen ring-misses/glitches meer op sprite-zware lijnen.
-    machine_set_sprite_defer(true);
-
-    // Machine draait: core 1 rendert vanaf nu live uit de VDP-state
-    // (192 lijnen MSX1, 212 MSX2).
+    // Render-op-core-0-model: core 0 emuleert ELKE lijn en rendert 'm meteen
+    // in de ring (correcte registerstand, precies zoals SDL). Core 1 doet
+    // alleen nog scanout + audio. Geen live-render-mismatch meer -> split-
+    // screen (R23/R2 mid-frame) e.d. kloppen vanzelf, en alle offload-/lead-/
+    // priming-/fallback-trucs vervallen. Lijnbron blijft NULL (producer uit).
     const int vis_h = machine_display_height();
-    video_hstx_set_line_source(machine_line_source, vis_h);
+    video_hstx_set_line_source(NULL, vis_h);
 
     if (use_game && use_game_size >= 4096) {
         dbg_xip_ptr = use_game;
@@ -464,36 +451,29 @@ int main(void)
 
         uint32_t f_start = video_hstx_frame_count();
 
-        // Eén MSX-frame emuleren, beam-paced: elke lijn wordt pas gedraaid
-        // als de HSTX-scanout in de buurt komt (max ~24 lijnen vooruit: de
-        // stale-preventie zit tegenwoordig bij de producer zelf — die rendert
-        // alleen al-geëmuleerde lijnen — dus core 0 mag ruim vooruit en houdt
-        // zo marge voor drukke frames zoals een zware muziekdriver), zodat
-        // core 1's live lijnrender altijd actuele-maar-al-geëmuleerde VDP-
-        // state ziet. Vblank-lijnen (192+) hoeven niet te wachten.
+        // Eén MSX-frame: elke zichtbare lijn wordt geëmuleerd en meteen in de
+        // ring gerenderd, gepaced op de scanout (max ~12 lijnen vooruit, past
+        // in de 16-slots ring). De pacing-wachttijd benutten we voor audio.
         video_hstx_set_border(machine_border_565());
         for (int ln = 0; ln < 262; ln++) {
             if (ln < vis_h) {
-                while (video_hstx_scan_msx_line() < ln - 24) {
+                while (video_hstx_scan_msx_line() < ln - 12) {
                     extern volatile int dbg_pace_ln, dbg_pace_scan;
                     dbg_pace_ln = ln;
                     dbg_pace_scan = video_hstx_scan_msx_line();
 #ifdef BAREMSX_USB_KEYBOARD
                     usbkbd_task();
 #endif
-                    // Audio synthetiseren ín de wachttijd: hier heeft core 0
-                    // per definitie voorsprong op de beam, dus dit kost het
-                    // beam-budget niets — en het haalt de synthese uit het
-                    // krappe vblank-staartje (waar hij de frame-flank liet
-                    // missen -> stale-frame-flikker).
                     audio_hdmi_generate_burst(16);
                 }
             }
             machine_do_line(ln);
-            // Vangnet: in vblank af en toe bijvullen (de hoofdaanvoer zit in
-            // de pacing-wachtlus hierboven, waar core 0 tóch idle is).
-            if (ln >= vis_h && (ln & 15) == 15)
+            if (ln < vis_h) {
+                int w = machine_render_line_565(video_hstx_claim_line(ln), ln);
+                video_hstx_publish_line(ln, w);
+            } else if ((ln & 15) == 15) {
                 audio_hdmi_generate_burst(256);
+            }
         }
 
         audio_hdmi_generate();   // restje van dit frame
