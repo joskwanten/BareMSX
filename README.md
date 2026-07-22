@@ -1,6 +1,6 @@
 # BareMSX
 
-An open-source **MSX1 emulator for the Raspberry Pi Pico 2 (RP2350)** with
+An open-source **MSX1/MSX2 emulator for the Raspberry Pi Pico 2 (RP2350)** with
 **HDMI/DVI output over HSTX**, HDMI audio, a USB keyboard, and an SD card with
 a classic MSX-styled boot menu.
 
@@ -13,7 +13,8 @@ hence the git history — but is now HDMI-first.)
 
 ## Features
 
-- **Emulation** — Z80 ([Zeta](https://github.com/redcode/Z80) core), TMS9918 VDP,
+- **Emulation** — Z80 ([Zeta](https://github.com/redcode/Z80) core), TMS9918
+  (MSX1) and V9938 (MSX2) VDP,
   AY-3-8910 PSG ([emu2149](https://github.com/digital-sound-antiques/emu2149)),
   Konami SCC, 8255 PPI keyboard.
 - **Cartridge mappers** — plain 16/32K, Konami, Konami SCC, ASCII8, ASCII16,
@@ -35,12 +36,16 @@ hence the git history — but is now HDMI-first.)
   the image, so games can save. Needs a real MSX1 BIOS — C-BIOS cannot
   boot disks.
 
-Status: work in progress. The **MSX2 profile (V9938)** runs in the SDL
-desktop build: SCREEN 0-8, sprite mode 2 with collision/status semantics,
-and a command engine with a realistic busy-timing model (validated against
-MAME's v99x8 — see `docs/V9938-MAME-DIFF.md` for the full comparison and
-per-finding status). MSX2 on the Pico itself waits for PSRAM support
-(128KB VRAM + mapper RAM don't fit next to the framebuffers in SRAM).
+Status: work in progress. The **MSX2 profile (V9938)** now runs on a bare
+Pico 2 as well as in the SDL desktop build: SCREEN 0-8, sprite mode 2 with
+collision/status semantics, and a command engine with a realistic busy-timing
+model (validated against MAME's v99x8 — see `docs/V9938-MAME-DIFF.md` for the
+full comparison and per-finding status). Fitting the 128KB VRAM + mapper RAM
+into SRAM next to the HDMI framebuffers meant a race-the-beam line renderer
+(core 0 emulates and renders each scanline, core 1 streams it out over HSTX)
+instead of a full framebuffer. Aleste, Zanac-EX and Quarth run glitch-free —
+only a handful of games tested so far. (Audio has a known per-channel wobble
+on the Pico for Aleste specifically; see the audio note below.)
 
 Still open on the V9938:
 
