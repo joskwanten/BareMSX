@@ -10,12 +10,12 @@
 #define ROWS (SCR_H / 8) // 24
 
 // MSX (TMS9918) palette colours, ARGB — same values as tms9918.c.
-#define COL_BG       0xff5455ed // MSX default blue (palette 4)
+#define COL_BG       0xff2424ff // MSX default blue (palet 4 = {1,1,7}, c3to8)
 #define COL_TEXT     0xffffffff // white (15)
 #define COL_DIM      0xffcccccc // gray (14) for empty values
 #define COL_TITLE    0xff42ebf5 // cyan (7)
 #define COL_SEL_BG   0xffffffff // white highlight bar
-#define COL_SEL_TEXT 0xff5455ed // blue text on the bar (palette 4)
+#define COL_SEL_TEXT 0xff2424ff // blue text on the bar (palet 4)
 
 // --- state ---
 static const uint8_t *g_font;      // 256 chars x 8 bytes, from the BIOS

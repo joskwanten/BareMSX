@@ -269,10 +269,10 @@ int main(void)
                 }
             } else {
                 // Boot-menu: rendert in menu_fb; core 1 scant het uit via
-                // de menu-lijnbron. 0x52BD = MSX-blauw (565).
+                // de menu-lijnbron. 0x213F = MSX palet-4-blauw (565).
                 memset(&cfg, 0, sizeof cfg);
                 menu_init(sd_bios, &cfg);
-                video_hstx_set_border(0x52BD);
+                video_hstx_set_border(0x213F); // MSX palet-4-blauw (== menu COL_BG)
                 video_hstx_set_line_source(menu_line_source, MSX_H);
                 usbkbd_menu_mode(true);
                 menu_render(menu_fb); // eenmalig; daarna alleen bij input
@@ -400,7 +400,7 @@ int main(void)
         // Geen BIOS beschikbaar: geen (leesbare) SD-kaart en geen ingebakken
         // fallback. Effen MSX-blauw scherm als "plaats een SD-kaart"-signaal.
         printf("[boot] no BIOS: insert an SD card with system/<bios>.rom\n");
-        video_hstx_set_border(0x52BD);
+        video_hstx_set_border(0x213F); // MSX palet-4-blauw (== menu COL_BG)
         video_hstx_set_line_source(NULL, MSX_H); // alleen border = effen blauw
         while (true) tight_loop_contents();
     }
