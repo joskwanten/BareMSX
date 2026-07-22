@@ -22,10 +22,10 @@
 // scanlinecallback consumeert. ring_line[i] = welk MSX-lijnnummer er in slot
 // i klaarstaat (-1 = leeg); pas gezet NA het vullen (dmb) zodat de consumer
 // nooit een half gevulde lijn ziet.
-// Ring van 16 lijnen: core 0 rendert vooruit in de ring (render-op-core-0-
+// Ring van 24 lijnen: core 0 rendert vooruit in de ring (render-op-core-0-
 // model), core 1 scant 'm uit. Ruim genoeg om z80-variantie (muziek/blit) te
 // absorberen zonder de scanout in te halen.
-#define RING_N 16
+#define RING_N 24
 static uint16_t ring[RING_N][512];
 static volatile int16_t ring_line[RING_N];
 static volatile uint16_t ring_w[RING_N];

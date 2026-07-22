@@ -452,12 +452,12 @@ int main(void)
         uint32_t f_start = video_hstx_frame_count();
 
         // Eén MSX-frame: elke zichtbare lijn wordt geëmuleerd en meteen in de
-        // ring gerenderd, gepaced op de scanout (max ~12 lijnen vooruit, past
-        // in de 16-slots ring). De pacing-wachttijd benutten we voor audio.
+        // ring gerenderd, gepaced op de scanout (max ~20 lijnen vooruit, past
+        // in de 24-slots ring). De pacing-wachttijd benutten we voor audio.
         video_hstx_set_border(machine_border_565());
         for (int ln = 0; ln < 262; ln++) {
             if (ln < vis_h) {
-                while (video_hstx_scan_msx_line() < ln - 12) {
+                while (video_hstx_scan_msx_line() < ln - 20) {
                     extern volatile int dbg_pace_ln, dbg_pace_scan;
                     dbg_pace_ln = ln;
                     dbg_pace_scan = video_hstx_scan_msx_line();
@@ -502,15 +502,9 @@ int main(void)
         }
 
         // Eens per seconde: emulatie-fps + display-fps
-        if (time_us_64() - sec_t0 >= 1000000) {
-            static uint32_t last_disp = 0;
-            uint32_t disp = video_hstx_frame_count();
-            printf("[fps] emu=%lu display=%lu  pc=%04X\n",
-                   (unsigned long)emu_frames, (unsigned long)(disp - last_disp),
-                   machine_dbg_pc());
-            last_disp = disp;
-            emu_frames = 0;
-            sec_t0 = time_us_64();
-        }
+        // NB: geen per-seconde fps-printf meer — stdio (UART/USB) stalt core 0
+        // ~ms op de frame-rand, waardoor het volgende frame te laat start en de
+        // top mist (zichtbaar als een ~1s-flikker). Tellers blijven via SWD.
+        (void)sec_t0; (void)emu_frames;
     }
 }
