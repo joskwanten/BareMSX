@@ -3,6 +3,7 @@
 #include "pico_hdmi/video_output.h" // for MODE_SYNC_POSITIVE
 
 #include <string.h>
+#include "pico.h"
 
 #ifndef PICO_HDMI_RT_RUNTIME_MODE_ATTRS
 #define PICO_HDMI_RT_RUNTIME_MODE_ATTRS 0
@@ -16,7 +17,7 @@
 // TERC4 Symbol Table (4-bit to 10-bit encoding)
 // ============================================================================
 
-static const uint16_t ter_c4[16] = {
+static const uint16_t __not_in_flash("hstxpkt") ter_c4[16] = {
     0b1010011100, // 0
     0b1001100011, // 1
     0b1011100100, // 2
@@ -54,7 +55,7 @@ static bool packet_sync_positive = HSTX_PACKET_DEFAULT_SYNC_POSITIVE;
 // BCH Encoding
 // ============================================================================
 
-static const uint8_t bch_table[256] = {
+static const uint8_t __not_in_flash("hstxpkt") bch_table[256] = {
     0x00, 0xd9, 0xb5, 0x6c, 0x6d, 0xb4, 0xd8, 0x01, 0xda, 0x03, 0x6f, 0xb6, 0xb7, 0x6e, 0x02, 0xdb, 0xb3, 0x6a, 0x06,
     0xdf, 0xde, 0x07, 0x6b, 0xb2, 0x69, 0xb0, 0xdc, 0x05, 0x04, 0xdd, 0xb1, 0x68, 0x61, 0xb8, 0xd4, 0x0d, 0x0c, 0xd5,
     0xb9, 0x60, 0xbb, 0x62, 0x0e, 0xd7, 0xd6, 0x0f, 0x63, 0xba, 0xd2, 0x0b, 0x67, 0xbe, 0xbf, 0x66, 0x0a, 0xd3, 0x08,
@@ -71,7 +72,7 @@ static const uint8_t bch_table[256] = {
     0x92, 0x49, 0x90, 0xfc, 0x25, 0x24, 0xfd, 0x91, 0x48,
 };
 
-static const uint8_t parity_table[32] = {0x96, 0x69, 0x69, 0x96, 0x69, 0x96, 0x96, 0x69, 0x69, 0x96, 0x96,
+static const uint8_t __not_in_flash("hstxpkt") parity_table[32] = {0x96, 0x69, 0x69, 0x96, 0x69, 0x96, 0x96, 0x69, 0x69, 0x96, 0x96,
                                          0x69, 0x96, 0x69, 0x69, 0x96, 0x69, 0x96, 0x96, 0x69, 0x96, 0x69,
                                          0x69, 0x96, 0x96, 0x69, 0x69, 0x96, 0x69, 0x96, 0x96, 0x69};
 
@@ -85,7 +86,7 @@ static inline bool compute_parity3(uint8_t a, uint8_t b, uint8_t c)
     return compute_parity(a) ^ compute_parity(b) ^ compute_parity(c);
 }
 
-static uint8_t encode_bch_3(const uint8_t *p)
+static uint8_t __not_in_flash_func(encode_bch_3)(const uint8_t *p)
 {
     uint8_t v = bch_table[p[0]];
     v = bch_table[p[1] ^ v];
@@ -93,7 +94,7 @@ static uint8_t encode_bch_3(const uint8_t *p)
     return v;
 }
 
-static uint8_t encode_bch_7(const uint8_t *p)
+static uint8_t __not_in_flash_func(encode_bch_7)(const uint8_t *p)
 {
     uint8_t v = bch_table[p[0]];
     v = bch_table[p[1] ^ v];
@@ -105,12 +106,12 @@ static uint8_t encode_bch_7(const uint8_t *p)
     return v;
 }
 
-static void compute_header_parity(hstx_packet_t *p)
+static void __not_in_flash_func(compute_header_parity)(hstx_packet_t *p)
 {
     p->header[3] = encode_bch_3(p->header);
 }
 
-static void compute_subpacket_parity(hstx_packet_t *p, int idx)
+static void __not_in_flash_func(compute_subpacket_parity)(hstx_packet_t *p, int idx)
 {
     p->subpacket[idx][7] = encode_bch_7(p->subpacket[idx]);
 }
@@ -142,7 +143,7 @@ static void compute_infoframe_checksum(hstx_packet_t *p)
 // Public API
 // ============================================================================
 
-void hstx_packet_init(hstx_packet_t *packet)
+void __not_in_flash_func(hstx_packet_init)(hstx_packet_t *packet)
 {
     memset(packet, 0, sizeof(hstx_packet_t));
 }
@@ -250,11 +251,11 @@ void hstx_packet_set_avi_infoframe(hstx_packet_t *packet, uint8_t vic, uint8_t p
 // sample frequency (byte3=0x02). All later bytes zero.
 static inline int channel_status_bit(int frame)
 {
-    static const uint8_t cs[5] = {0x04, 0x00, 0x00, 0x02, 0x00};
+    static const uint8_t __not_in_flash("hstxpkt") cs[5] = {0x04, 0x00, 0x00, 0x02, 0x00};
     return frame < 40 ? (cs[frame >> 3] >> (frame & 7)) & 1 : 0;
 }
 
-int hstx_packet_set_audio_samples_cs(hstx_packet_t *packet, const audio_sample_t *samples, int num_samples,
+int __not_in_flash_func(hstx_packet_set_audio_samples_cs)(hstx_packet_t *packet, const audio_sample_t *samples, int num_samples,
                                      int frame_count)
 {
     hstx_packet_init(packet);
@@ -305,7 +306,7 @@ int hstx_packet_set_audio_samples_cs(hstx_packet_t *packet, const audio_sample_t
     return temp_frame_count;
 }
 
-int hstx_packet_set_audio_samples(hstx_packet_t *packet, const audio_sample_t *samples, int num_samples,
+int __not_in_flash_func(hstx_packet_set_audio_samples)(hstx_packet_t *packet, const audio_sample_t *samples, int num_samples,
                                   int frame_count)
 {
     hstx_packet_init(packet);
@@ -356,7 +357,7 @@ static inline uint32_t make_hstx_word(uint16_t lane0, uint16_t lane1, uint16_t l
     return (lane0 & 0x3FF) | ((lane1 & 0x3FF) << 10) | ((lane2 & 0x3FF) << 20);
 }
 
-static void encode_header_to_lane0(const hstx_packet_t *packet, uint16_t *lane0, int hv, bool first_packet)
+static void __not_in_flash_func(encode_header_to_lane0)(const hstx_packet_t *packet, uint16_t *lane0, int hv, bool first_packet)
 {
     int hv1 = hv | 0x08;
     if (!first_packet)
@@ -377,7 +378,7 @@ static void encode_header_to_lane0(const hstx_packet_t *packet, uint16_t *lane0,
     }
 }
 
-static void encode_subpackets_to_lanes(const hstx_packet_t *packet, uint16_t *lane1, uint16_t *lane2)
+static void __not_in_flash_func(encode_subpackets_to_lanes)(const hstx_packet_t *packet, uint16_t *lane1, uint16_t *lane2)
 {
     for (int i = 0; i < 8; i++) {
         uint32_t v = (packet->subpacket[0][i] << 0) | (packet->subpacket[1][i] << 8) | (packet->subpacket[2][i] << 16) |
@@ -399,7 +400,7 @@ static void encode_subpackets_to_lanes(const hstx_packet_t *packet, uint16_t *la
     }
 }
 
-void hstx_encode_data_island(hstx_data_island_t *out, const hstx_packet_t *packet, bool vsync_active, bool hsync_active)
+void __not_in_flash_func(hstx_encode_data_island)(hstx_data_island_t *out, const hstx_packet_t *packet, bool vsync_active, bool hsync_active)
 {
     // vsync_active/hsync_active indicate pulse region, not wire level.
     // The hv field encodes the actual wire bits (bit1=vsync, bit0=hsync), so
