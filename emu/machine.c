@@ -61,14 +61,6 @@ static bool disk_attached = false;
 // 2x128KB V9938-context + 128KB mapper-pool pas aan als PSRAM er is).
 static bool g_msx2 = false;
 bool machine_is_msx2(void) { return g_msx2; }
-void machine_set_sprite_defer(bool on)
-{
-#ifdef BAREMSX_MSX2
-    v9938_set_sprite_defer(on);
-#else
-    (void)on;
-#endif
-}
 int machine_display_width(void)  { return g_msx2 ? 512 : 256; }
 int machine_display_height(void) { return g_msx2 ? 212 : 192; }
 #ifdef BAREMSX_MSX2
