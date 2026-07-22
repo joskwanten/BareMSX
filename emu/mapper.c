@@ -93,27 +93,40 @@ mapper_type_t mapper_detect(const uint8_t *rom, uint32_t size)
     // Small ROMs are plain (16K/32K/48K without a mapper).
     if (size <= 32u * 1024u) return MAPPER_PLAIN;
 
-    // Heuristic: count LD (nnnn),A (0x32) writes to each mapper's bank registers.
-    int konami = 0, scc = 0, ascii8 = 0, ascii16 = 0;
+    // Heuristic: count LD (nnnn),A (0x32) writes to each mapper's bank
+    // registers. We tellen alleen de ONDERSCHEIDENDE adressen — 0x6000 en
+    // 0x7000 delen (bijna) alle mappers, dus die zeggen niets over SCC/Konami.
+    // Een echte SCC-game schrijft naar 0x5000/0x9000/0xB000, een Konami-game
+    // naar 0x8000/0xA000, een ASCII8-game naar 0x6800/0x7800. Wie alléén
+    // 0x6000/0x7000 gebruikt is ASCII16 (twee 16KB-banks) — dat was Zanac-EX,
+    // dat eerder als konami-scc werd misgedetecteerd door de gedeelde adressen.
+    int scc_bits = 0, kon_bits = 0, scc_n = 0, kon_n = 0, a8_ex = 0;
     for (uint32_t i = 0; i + 2 < size; i++) {
         if (rom[i] != 0x32) continue; // LD (nnnn),A
         uint16_t a = (uint16_t)(rom[i + 1] | (rom[i + 2] << 8));
         switch (a) {
-        case 0x4000: case 0x8000: case 0xA000: konami++; break;
-        case 0x5000: case 0x9000: case 0xB000: scc++; break;
-        case 0x6800: case 0x7800: ascii8++; break;
-        case 0x6000: konami++; scc++; ascii8++; ascii16++; break; // shared
-        case 0x7000: scc++; ascii8++; ascii16++; break;           // shared
+        case 0x5000: scc_bits |= 1; scc_n++; break; // SCC-exclusieve banks
+        case 0x9000: scc_bits |= 2; scc_n++; break;
+        case 0xB000: scc_bits |= 4; scc_n++; break;
+        case 0x4000: kon_bits |= 1; kon_n++; break; // Konami-exclusieve banks
+        case 0x8000: kon_bits |= 2; kon_n++; break;
+        case 0xA000: kon_bits |= 4; kon_n++; break;
+        case 0x6800: case 0x7800: a8_ex++; break;   // ASCII8-exclusief
+        // 0x6000/0x7000 zijn gedeeld (alle mappers) -> geen onderscheidende stem
         default: break;
         }
     }
 
-    // Pick the highest score; prefer SCC then Konami on ties (Konami mega-ROMs).
-    int best = scc;
-    mapper_type_t t = MAPPER_KONAMI_SCC;
-    if (konami > best) { best = konami; t = MAPPER_KONAMI; }
-    if (ascii8 > best) { best = ascii8; t = MAPPER_ASCII8; }
-    if (ascii16 > best) { best = ascii16; t = MAPPER_ASCII16; }
-    if (best == 0) t = MAPPER_ASCII16; // >32K with no clear pattern -> ASCII16 is the safest default
-    return t;
+    // Een échte megaROM paget álle vensters, dus schrijft meerdere DISTINCT
+    // bank-registers en doet dat vaak. Eén losse write is toevallige data
+    // (Aleste: één 0x5000 -> werd fout als konami-scc gedetecteerd). Drempel:
+    // >=2 distinct onderscheidende registers, of >=6 writes.
+    int scc_d = __builtin_popcount((unsigned)scc_bits);
+    int kon_d = __builtin_popcount((unsigned)kon_bits);
+    bool is_scc = scc_d >= 2 || scc_n >= 6;
+    bool is_kon = kon_d >= 2 || kon_n >= 6;
+    if (is_scc && scc_n >= kon_n) return MAPPER_KONAMI_SCC;
+    if (is_kon) return MAPPER_KONAMI;
+    if (a8_ex) return MAPPER_ASCII8;
+    return MAPPER_ASCII16; // alleen gedeelde/geen writes -> veilige default
 }
