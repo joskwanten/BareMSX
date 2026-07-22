@@ -1261,10 +1261,12 @@ static int __not_in_flash_func(render_line_idx)(v9938_context_t *ctx, uint8_t *b
         if (mode == 0x1C) { // G7: R7 is een ruwe GRB332-byte, geen paletindex
             memset(buf, ctx->regs[7], 256);
             *g7 = true;
+        } else if (mode == 0x10) { // G5: backdrop = R7-dither, even helft (R7>>2)&3
+            memset(buf, (ctx->regs[7] >> 2) & 3, 256);
         } else {
             memset(buf, BACKDROP_IDX(ctx), 256);
         }
-        return 256;
+        return 256; // altijd de backdrop-kleur die v9938_backdrop_color (rand) geeft
     }
 
     switch (mode) {
